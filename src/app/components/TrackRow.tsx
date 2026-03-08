@@ -5,6 +5,7 @@ import heartbreakIcon from "@/assets/icons/heartbreak-stroke-rounded.svg";
 import subtitleIcon from "@/assets/icons/subtitle-stroke-rounded.svg";
 import { Track } from "../types";
 import { formatDuration } from "../utils/format";
+import { splitTrackArtists } from "../utils/artists";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
 
 interface TrackRowProps {
@@ -16,6 +17,7 @@ interface TrackRowProps {
   onPlay: () => void;
   onAddToPlaylist: () => void;
   onShowLyrics: () => void;
+  onOpenArtist: (artistName?: string) => void;
   onRemoveFromPlaylist?: () => void;
 }
 
@@ -42,8 +44,11 @@ export function TrackRow({
   onPlay,
   onAddToPlaylist,
   onShowLyrics,
+  onOpenArtist,
   onRemoveFromPlaylist,
 }: TrackRowProps) {
+  const artists = splitTrackArtists(track.artist);
+
   return (
     <article
       className={`group rounded-xl px-3 py-1.5 transition-colors ${
@@ -83,15 +88,38 @@ export function TrackRow({
               </span>
             ) : null}
           </div>
-          <div className="mt-1 truncate text-sm text-white/50">{track.artist}</div>
+          {artists.length <= 1 ? (
+            <button
+              type="button"
+              onClick={() => onOpenArtist(artists[0])}
+              className="mt-1 truncate text-left text-sm text-white/50 transition hover:text-cyan-100"
+            >
+              {track.artist}
+            </button>
+          ) : (
+            <div className="mt-1 flex flex-wrap items-center gap-x-1 text-sm text-white/45">
+              {artists.map((artistName, index) => (
+                <div key={`${track.id}:${artistName}`} className="contents">
+                  <button
+                    type="button"
+                    onClick={() => onOpenArtist(artistName)}
+                    className="max-w-full truncate text-left text-sm text-white/55 transition hover:text-cyan-100"
+                  >
+                    {artistName}
+                  </button>
+                  {index < artists.length - 1 ? <span className="text-white/35">,</span> : null}
+                </div>
+              ))}
+            </div>
+          )}
           {track.downloadError ? <div className="mt-2 text-xs text-rose-200/80">{track.downloadError}</div> : null}
         </div>
 
         <div className="hidden min-w-[46px] text-right text-sm text-white/45 md:block">{formatDuration(track.duration)}</div>
 
         <div className="flex items-center gap-1">
-          <button type="button" onClick={onShowLyrics} className="rounded-full p-2 text-white/45 transition hover:bg-white/8 hover:text-white" title="Текст">
-            <img src={subtitleIcon} alt="Текст" className="h-[18px] w-[18px] opacity-80" />
+          <button type="button" onClick={onShowLyrics} className="rounded-full p-2 text-white/45 transition hover:bg-white/8 hover:text-white" title="Детали трека">
+            <img src={subtitleIcon} alt="Детали трека" className="h-[18px] w-[18px] opacity-80" />
           </button>
           <button type="button" onClick={onAddToPlaylist} className="rounded-full p-2 text-white/45 transition hover:bg-white/8 hover:text-white" title="Добавить в плейлист">
             <ListPlus size={18} />

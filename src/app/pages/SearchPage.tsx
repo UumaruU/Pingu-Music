@@ -1,4 +1,4 @@
-﻿import { EmptyState } from "../components/EmptyState";
+import { EmptyState } from "../components/EmptyState";
 import { TrackList } from "../components/TrackList";
 import { SearchStatus, Track } from "../types";
 
@@ -10,6 +10,7 @@ interface SearchPageProps {
   onToggleFavorite: (trackId: string) => void;
   onAddToPlaylist: (trackId: string) => void;
   onShowLyrics: (trackId: string) => void;
+  onOpenArtist: (trackId: string, artistName?: string) => void;
   query: string;
   status: SearchStatus;
   error: string | null;
@@ -31,8 +32,7 @@ export function SearchPage({
       <section className="rounded-[32px] border border-white/10 bg-white/[0.03] p-8 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
         <h1 className="text-3xl font-semibold text-white">Поиск музыки</h1>
         <p className="mt-3 max-w-2xl text-sm leading-7 text-white/55">
-          Введите запрос, чтобы увидеть результаты поиска. При пустом запросе показываются
-          популярные треки.
+          Введите запрос, чтобы увидеть результаты поиска. При пустом запросе показываются популярные треки.
         </p>
         <div className="mt-6 flex flex-wrap gap-2">
           {recentQueries.length ? (
@@ -55,7 +55,7 @@ export function SearchPage({
       {status === "loading" ? (
         <EmptyState
           title="Загрузка..."
-          description="Ищем треки и синхронизируем результаты поиска."
+          description="Ищем треки и обновляем карточки метаданных."
         />
       ) : null}
 

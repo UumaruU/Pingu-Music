@@ -9,6 +9,7 @@ function normalizeTrack(track: HitmosTrackDto): Track {
     sourceUrl: track.sourceUrl || "https://rus.hitmotop.com",
     isFavorite: false,
     downloadState: "idle",
+    metadataStatus: "raw",
   };
 }
 

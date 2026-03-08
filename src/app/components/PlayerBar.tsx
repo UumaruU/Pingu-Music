@@ -10,6 +10,7 @@ import volumeHighIcon from "@/assets/icons/volume-high-stroke-rounded.svg";
 import volumeLowIcon from "@/assets/icons/volume-low-stroke-rounded.svg";
 import volumeMuteIcon from "@/assets/icons/volume-mute-02-stroke-rounded.svg";
 import { RepeatMode, Track } from "../types";
+import { splitTrackArtists } from "../utils/artists";
 import { formatDuration } from "../utils/format";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
 
@@ -33,6 +34,8 @@ interface PlayerBarProps {
   onShowLyrics: () => void;
   onToggleFavorite: () => void;
   onAddToPlaylist: () => void;
+  onOpenArtist: (artistName?: string) => void;
+  onOpenNowPlaying: () => void;
 }
 
 const repeatIconByMode: Record<RepeatMode, string> = {
@@ -99,6 +102,8 @@ export function PlayerBar({
   onShowLyrics,
   onToggleFavorite,
   onAddToPlaylist,
+  onOpenArtist,
+  onOpenNowPlaying,
 }: PlayerBarProps) {
   const safeDuration = currentTrack ? Math.max(0, duration || currentTrack.duration) : 0;
   const boundedProgress = toBoundedNumber(progress, 0, safeDuration || 0);
@@ -108,6 +113,7 @@ export function PlayerBar({
   const progressPercent = safeDuration > 0 ? (boundedProgress / safeDuration) * 100 : 0;
   const volumeTrackPercent = volumeValue * 100;
   const favorite = !!currentTrack?.isFavorite;
+  const artistNames = currentTrack ? splitTrackArtists(currentTrack.artist) : [];
 
   return (
     <footer className="border-t border-white/6 px-5 py-3 sm:px-6">
@@ -115,10 +121,40 @@ export function PlayerBar({
         {currentTrack ? (
           <div className="grid items-center gap-4 xl:grid-cols-[minmax(0,320px)_minmax(0,1fr)_220px]">
             <div className="flex min-w-0 items-center gap-4">
-              <ImageWithFallback src={currentTrack.coverUrl} alt={currentTrack.title} className="h-16 w-16 shrink-0 rounded-2xl object-cover" />
+              <button
+                type="button"
+                onClick={onOpenNowPlaying}
+                title="Открыть полноэкранный плеер"
+                className="shrink-0 rounded-2xl transition hover:opacity-90"
+              >
+                <ImageWithFallback src={currentTrack.coverUrl} alt={currentTrack.title} className="h-16 w-16 rounded-2xl object-cover" />
+              </button>
               <div className="min-w-0">
                 <div className="truncate text-xl font-semibold text-white">{currentTrack.title}</div>
-                <div className="mt-1 truncate text-sm text-white/55">{currentTrack.artist}</div>
+                {artistNames.length <= 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenArtist(artistNames[0])}
+                    className="mt-1 truncate text-left text-sm text-cyan-200/80 transition hover:text-cyan-100"
+                  >
+                    {currentTrack.artist}
+                  </button>
+                ) : (
+                  <div className="mt-1 flex flex-wrap items-center gap-x-1 text-sm text-cyan-200/80">
+                    {artistNames.map((artistName, index) => (
+                      <div key={`${currentTrack.id}:${artistName}`} className="contents">
+                        <button
+                          type="button"
+                          onClick={() => onOpenArtist(artistName)}
+                          className="truncate text-left transition hover:text-cyan-100"
+                        >
+                          {artistName}
+                        </button>
+                        {index < artistNames.length - 1 ? <span className="text-white/35">,</span> : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="mt-2 inline-flex rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs uppercase tracking-[0.2em] text-white/55">
                   {repeatLabelByMode[repeatMode]}
                 </div>
@@ -163,8 +199,8 @@ export function PlayerBar({
                 <button type="button" onClick={onCycleRepeatMode} title={repeatLabelByMode[repeatMode]} className={iconButtonClass(repeatMode !== "off")}>
                   <img src={repeatIconByMode[repeatMode]} alt={repeatLabelByMode[repeatMode]} className="h-[18px] w-[18px]" />
                 </button>
-                <button type="button" onClick={onShowLyrics} title="Текст" className={iconButtonClass()}>
-                  <img src={subtitleIcon} alt="Текст" className="h-[18px] w-[18px]" />
+                <button type="button" onClick={onShowLyrics} title="Детали трека" className={iconButtonClass()}>
+                  <img src={subtitleIcon} alt="Детали трека" className="h-[18px] w-[18px]" />
                 </button>
               </div>
 

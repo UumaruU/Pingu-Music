@@ -1,4 +1,4 @@
-﻿import { EmptyState } from "../components/EmptyState";
+import { EmptyState } from "../components/EmptyState";
 import { TrackList } from "../components/TrackList";
 import { Track } from "../types";
 
@@ -10,6 +10,7 @@ interface FavoritesPageProps {
   onToggleFavorite: (trackId: string) => void;
   onAddToPlaylist: (trackId: string) => void;
   onShowLyrics: (trackId: string) => void;
+  onOpenArtist: (trackId: string, artistName?: string) => void;
 }
 
 export function FavoritesPage(props: FavoritesPageProps) {

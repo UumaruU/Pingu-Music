@@ -1,14 +1,22 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import {
+  Artist,
+  EntityLoadStatus,
+  Lyrics,
   PlayerSettings,
   Playlist,
   RecentSearch,
+  Release,
   RepeatMode,
   SearchStatus,
   Track,
 } from "../types";
+
 type TrackMap = Record<string, Track>;
+type ArtistMap = Record<string, Artist>;
+type ReleaseMap = Record<string, Release>;
+type LyricsMap = Record<string, Lyrics>;
 
 const defaultPlayerSettings: PlayerSettings = {
   volume: 0.75,
@@ -19,6 +27,13 @@ const defaultPlayerSettings: PlayerSettings = {
 
 interface AppState {
   tracks: TrackMap;
+  artists: ArtistMap;
+  releases: ReleaseMap;
+  lyricsByTrackId: LyricsMap;
+  artistStatuses: Record<string, EntityLoadStatus>;
+  artistTrackIdsByArtistId: Record<string, string[]>;
+  artistTrackStatuses: Record<string, EntityLoadStatus>;
+  releaseStatuses: Record<string, EntityLoadStatus>;
   popularTrackIds: string[];
   searchResultIds: string[];
   searchQuery: string;
@@ -35,7 +50,7 @@ interface AppState {
   progress: number;
   duration: number;
   playerSettings: PlayerSettings;
-  lyricsTrackId: string | null;
+  detailsTrackId: string | null;
   hydrateCatalog: (tracks: Track[]) => void;
   setPopularTracks: (tracks: Track[]) => void;
   setSearchState: (payload: {
@@ -52,6 +67,14 @@ interface AppState {
     localPath?: string,
     downloadError?: string,
   ) => void;
+  setTrackMetadata: (trackId: string, patch: Partial<Track>) => void;
+  hydrateArtists: (artists: Artist[]) => void;
+  upsertRelease: (release: Release) => void;
+  setArtistStatus: (artistId: string, status: EntityLoadStatus) => void;
+  setArtistTracks: (artistId: string, trackIds: string[]) => void;
+  setArtistTrackStatus: (artistId: string, status: EntityLoadStatus) => void;
+  setReleaseStatus: (releaseId: string, status: EntityLoadStatus) => void;
+  setLyrics: (lyrics: Lyrics) => void;
   createPlaylist: (name: string) => string;
   deletePlaylist: (playlistId: string) => void;
   addTrackToPlaylist: (playlistId: string, trackId: string) => void;
@@ -65,29 +88,74 @@ interface AppState {
   setMuted: (muted: boolean) => void;
   setRepeatMode: (mode: RepeatMode) => void;
   setShuffleEnabled: (enabled: boolean) => void;
-  setLyricsTrackId: (trackId: string | null) => void;
+  setDetailsTrackId: (trackId: string | null) => void;
   restoreQueue: (queueIds: string[], currentTrackId: string | null, progress: number) => void;
 }
 
-function mergeTrack(existingTrack: Track | undefined, nextTrack: Track): Track {
-  const isFavorite = existingTrack?.isFavorite ?? nextTrack.isFavorite;
+function getPersistedTrackIds(
+  state: Pick<AppState, "favorites" | "playlists" | "currentQueue" | "originalQueue" | "currentTrackId">,
+) {
+  const trackIds = new Set<string>();
 
-  if (!isFavorite) {
-    return {
-      ...nextTrack,
-      isFavorite: false,
-      downloadState: "idle",
-      localPath: undefined,
-      downloadError: undefined,
-    };
+  state.favorites.forEach((trackId) => trackIds.add(trackId));
+  state.currentQueue.forEach((trackId) => trackIds.add(trackId));
+  state.originalQueue.forEach((trackId) => trackIds.add(trackId));
+  state.playlists.forEach((playlist) => {
+    playlist.trackIds.forEach((trackId) => trackIds.add(trackId));
+  });
+
+  if (state.currentTrackId) {
+    trackIds.add(state.currentTrackId);
   }
+
+  return trackIds;
+}
+
+function pickTracksForPersistence(tracks: TrackMap | undefined, trackIds: Set<string>) {
+  if (!tracks || !trackIds.size) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(tracks).filter(([trackId]) => trackIds.has(trackId)),
+  );
+}
+
+function mergeTrack(
+  existingTrack: Track | undefined,
+  nextTrack: Track,
+  favoriteTrackIds?: Set<string>,
+): Track {
+  const isFavorite = favoriteTrackIds
+    ? favoriteTrackIds.has(nextTrack.id)
+    : existingTrack?.isFavorite ?? nextTrack.isFavorite;
+  const metadataTrack =
+    existingTrack && existingTrack.metadataStatus !== "raw" ? existingTrack : nextTrack;
 
   return {
     ...nextTrack,
+    coverUrl: metadataTrack.coverUrl || nextTrack.coverUrl,
     isFavorite,
-    downloadState: existingTrack?.downloadState ?? nextTrack.downloadState,
-    localPath: existingTrack?.localPath ?? nextTrack.localPath,
-    downloadError: existingTrack?.downloadError ?? nextTrack.downloadError,
+    downloadState: isFavorite
+      ? existingTrack?.downloadState ?? nextTrack.downloadState
+      : "idle",
+    localPath: isFavorite ? existingTrack?.localPath ?? nextTrack.localPath : undefined,
+    downloadError: isFavorite
+      ? existingTrack?.downloadError ?? nextTrack.downloadError
+      : undefined,
+    musicBrainzRecordingId:
+      existingTrack?.musicBrainzRecordingId ?? nextTrack.musicBrainzRecordingId,
+    musicBrainzArtistId: existingTrack?.musicBrainzArtistId ?? nextTrack.musicBrainzArtistId,
+    musicBrainzReleaseId:
+      existingTrack?.musicBrainzReleaseId ?? nextTrack.musicBrainzReleaseId,
+    musicBrainzReleaseGroupId:
+      existingTrack?.musicBrainzReleaseGroupId ?? nextTrack.musicBrainzReleaseGroupId,
+    normalizedTitle: existingTrack?.normalizedTitle ?? nextTrack.normalizedTitle,
+    normalizedArtistName:
+      existingTrack?.normalizedArtistName ?? nextTrack.normalizedArtistName,
+    metadataStatus: existingTrack?.metadataStatus ?? nextTrack.metadataStatus,
+    albumTitle: existingTrack?.albumTitle ?? nextTrack.albumTitle,
+    releaseDate: existingTrack?.releaseDate ?? nextTrack.releaseDate,
   };
 }
 
@@ -95,6 +163,13 @@ export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
       tracks: {},
+      artists: {},
+      releases: {},
+      lyricsByTrackId: {},
+      artistStatuses: {},
+      artistTrackIdsByArtistId: {},
+      artistTrackStatuses: {},
+      releaseStatuses: {},
       popularTrackIds: [],
       searchResultIds: [],
       searchQuery: "",
@@ -111,13 +186,14 @@ export const useAppStore = create<AppState>()(
       progress: 0,
       duration: 0,
       playerSettings: defaultPlayerSettings,
-      lyricsTrackId: null,
+      detailsTrackId: null,
       hydrateCatalog: (tracks) => {
         set((state) => {
           const nextTracks = { ...state.tracks };
+          const favoriteTrackIds = new Set(state.favorites);
 
           for (const track of tracks) {
-            nextTracks[track.id] = mergeTrack(state.tracks[track.id], track);
+            nextTracks[track.id] = mergeTrack(state.tracks[track.id], track, favoriteTrackIds);
           }
 
           return { tracks: nextTracks };
@@ -187,6 +263,84 @@ export const useAppStore = create<AppState>()(
                   downloadError,
                 }
               : state.tracks[trackId],
+          },
+        }));
+      },
+      setTrackMetadata: (trackId, patch) => {
+        set((state) => ({
+          tracks: {
+            ...state.tracks,
+            [trackId]: state.tracks[trackId]
+              ? {
+                  ...state.tracks[trackId],
+                  ...patch,
+                }
+              : state.tracks[trackId],
+          },
+        }));
+      },
+      hydrateArtists: (artists) => {
+        set((state) => ({
+          artists: {
+            ...state.artists,
+            ...Object.fromEntries(artists.map((artist) => [artist.id, artist])),
+          },
+          artistStatuses: {
+            ...state.artistStatuses,
+            ...Object.fromEntries(artists.map((artist) => [artist.id, "ready"])),
+          },
+        }));
+      },
+      upsertRelease: (release) => {
+        set((state) => ({
+          releases: {
+            ...state.releases,
+            [release.id]: {
+              ...state.releases[release.id],
+              ...release,
+              trackIds: release.trackIds ?? state.releases[release.id]?.trackIds,
+              trackTitles: release.trackTitles ?? state.releases[release.id]?.trackTitles,
+            },
+          },
+        }));
+      },
+      setArtistStatus: (artistId, status) => {
+        set((state) => ({
+          artistStatuses: {
+            ...state.artistStatuses,
+            [artistId]: status,
+          },
+        }));
+      },
+      setArtistTracks: (artistId, trackIds) => {
+        set((state) => ({
+          artistTrackIdsByArtistId: {
+            ...state.artistTrackIdsByArtistId,
+            [artistId]: trackIds,
+          },
+        }));
+      },
+      setArtistTrackStatus: (artistId, status) => {
+        set((state) => ({
+          artistTrackStatuses: {
+            ...state.artistTrackStatuses,
+            [artistId]: status,
+          },
+        }));
+      },
+      setReleaseStatus: (releaseId, status) => {
+        set((state) => ({
+          releaseStatuses: {
+            ...state.releaseStatuses,
+            [releaseId]: status,
+          },
+        }));
+      },
+      setLyrics: (lyrics) => {
+        set((state) => ({
+          lyricsByTrackId: {
+            ...state.lyricsByTrackId,
+            [lyrics.trackId]: lyrics,
           },
         }));
       },
@@ -260,7 +414,7 @@ export const useAppStore = create<AppState>()(
         set((state) => ({ playerSettings: { ...state.playerSettings, repeatMode } })),
       setShuffleEnabled: (shuffleEnabled) =>
         set((state) => ({ playerSettings: { ...state.playerSettings, shuffleEnabled } })),
-      setLyricsTrackId: (trackId) => set({ lyricsTrackId: trackId }),
+      setDetailsTrackId: (trackId) => set({ detailsTrackId: trackId }),
       restoreQueue: (queueIds, currentTrackId, progress) => {
         const currentTrackIndex =
           currentTrackId === null ? -1 : queueIds.findIndex((trackId) => trackId === currentTrackId);
@@ -276,7 +430,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: "app-state",
-      version: 4,
+      version: 7,
       storage: createJSONStorage(() => localStorage),
       migrate: (persistedState) => {
         const state = persistedState as Partial<AppState> | undefined;
@@ -285,34 +439,69 @@ export const useAppStore = create<AppState>()(
           return persistedState as unknown as AppState;
         }
 
+        const favorites = Array.isArray(state.favorites) ? state.favorites : [];
+        const playlists = Array.isArray(state.playlists) ? state.playlists : [];
+        const currentQueue = Array.isArray(state.currentQueue) ? state.currentQueue : [];
+        const originalQueue = Array.isArray(state.originalQueue)
+          ? state.originalQueue
+          : currentQueue;
+        const currentTrackId =
+          typeof state.currentTrackId === "string" ? state.currentTrackId : null;
+        const persistedTrackIds = getPersistedTrackIds({
+          favorites,
+          playlists,
+          currentQueue,
+          originalQueue,
+          currentTrackId,
+        });
+
         return {
           ...state,
-          tracks: {},
+          tracks: pickTracksForPersistence(state.tracks as TrackMap | undefined, persistedTrackIds),
+          artists: {},
+          releases: {},
+          lyricsByTrackId: {},
+          artistStatuses: {},
+          artistTrackIdsByArtistId: {},
+          artistTrackStatuses: {},
+          releaseStatuses: {},
           popularTrackIds: [],
           searchResultIds: [],
-          currentQueue: [],
-          originalQueue: [],
-          currentTrackIndex: -1,
-          currentTrackId: null,
-          progress: 0,
+          searchStatus: "idle",
+          searchError: null,
+          recentSearches: Array.isArray(state.recentSearches) ? state.recentSearches : [],
+          favorites,
+          playlists,
+          currentQueue,
+          originalQueue,
+          currentTrackIndex:
+            typeof state.currentTrackIndex === "number" ? state.currentTrackIndex : -1,
+          currentTrackId,
+          isPlaying: false,
+          progress: typeof state.progress === "number" ? state.progress : 0,
           duration: 0,
-          lyricsTrackId: null,
+          detailsTrackId: null,
+          playerSettings: state.playerSettings ?? defaultPlayerSettings,
+          searchQuery: typeof state.searchQuery === "string" ? state.searchQuery : "",
         } as AppState;
       },
-      partialize: (state) => ({
-        tracks: state.tracks,
-        popularTrackIds: state.popularTrackIds,
-        searchQuery: state.searchQuery,
-        recentSearches: state.recentSearches,
-        favorites: state.favorites,
-        playlists: state.playlists,
-        currentQueue: state.currentQueue,
-        originalQueue: state.originalQueue,
-        currentTrackIndex: state.currentTrackIndex,
-        currentTrackId: state.currentTrackId,
-        progress: state.progress,
-        playerSettings: state.playerSettings,
-      }),
+      partialize: (state) => {
+        const persistedTrackIds = getPersistedTrackIds(state);
+
+        return {
+          tracks: pickTracksForPersistence(state.tracks, persistedTrackIds),
+          searchQuery: state.searchQuery,
+          recentSearches: state.recentSearches,
+          favorites: state.favorites,
+          playlists: state.playlists,
+          currentQueue: state.currentQueue,
+          originalQueue: state.originalQueue,
+          currentTrackIndex: state.currentTrackIndex,
+          currentTrackId: state.currentTrackId,
+          progress: state.progress,
+          playerSettings: state.playerSettings,
+        };
+      },
     },
   ),
 );

@@ -1,4 +1,4 @@
-﻿import { Flame, Sparkles } from "lucide-react";
+import { Flame, Sparkles } from "lucide-react";
 import { EmptyState } from "../components/EmptyState";
 import { TrackList } from "../components/TrackList";
 import { Track } from "../types";
@@ -11,6 +11,7 @@ interface HomePageProps {
   onToggleFavorite: (trackId: string) => void;
   onAddToPlaylist: (trackId: string) => void;
   onShowLyrics: (trackId: string) => void;
+  onOpenArtist: (trackId: string, artistName?: string) => void;
 }
 
 export function HomePage(props: HomePageProps) {
@@ -26,7 +27,7 @@ export function HomePage(props: HomePageProps) {
             Музыка без лишнего шума: популярное, избранное и ваши плейлисты в одном окне.
           </h1>
           <p className="mt-4 max-w-xl text-sm leading-7 text-white/60">
-            Pingu Music помогает быстро находить треки, собирать плейлисты и слушать музыку в удобном формате.
+            Pingu Music помогает быстро находить треки, открывать исполнителей, тексты и собирать плейлисты в одном приложении.
           </p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
@@ -38,9 +39,9 @@ export function HomePage(props: HomePageProps) {
             <div className="mt-2 text-sm text-white/55">Пустой поиск автоматически показывает горячие треки из текущего каталога.</div>
           </div>
           <div className="rounded-[26px] border border-white/10 bg-white/[0.04] p-5">
-            <div className="text-sm uppercase tracking-[0.25em] text-white/35">Автозагрузка</div>
-            <div className="mt-3 text-lg font-semibold text-white">Избранное = скачивание</div>
-            <div className="mt-2 text-sm text-white/55">Кнопки загрузки нет: скачивание стартует автоматически, когда трек попадает в избранное.</div>
+            <div className="text-sm uppercase tracking-[0.25em] text-white/35">Метаданные</div>
+            <div className="mt-3 text-lg font-semibold text-white">Артисты и тексты</div>
+            <div className="mt-2 text-sm text-white/55">Карточки артистов, альбомы и тексты песен подтягиваются локально и кешируются во времени.</div>
           </div>
         </div>
       </section>

@@ -4,6 +4,7 @@ mod hitmos;
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_store::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
             hitmos::get_popular_hitmos,
             hitmos::search_hitmos,

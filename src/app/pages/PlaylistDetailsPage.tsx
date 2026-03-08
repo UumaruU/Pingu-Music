@@ -1,4 +1,4 @@
-﻿import { ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { EmptyState } from "../components/EmptyState";
 import { TrackList } from "../components/TrackList";
 import { Playlist, Track } from "../types";
@@ -12,6 +12,7 @@ interface PlaylistDetailsPageProps {
   onToggleFavorite: (trackId: string) => void;
   onAddToPlaylist: (trackId: string) => void;
   onShowLyrics: (trackId: string) => void;
+  onOpenArtist: (trackId: string, artistName?: string) => void;
   onRemoveFromPlaylist: (trackId: string) => void;
   onBack: () => void;
 }

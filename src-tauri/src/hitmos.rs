@@ -8,6 +8,7 @@ use std::time::Duration;
 use tauri::Manager;
 
 const HITMOS_BASE_URL: &str = "https://rus.hitmotop.com";
+const MAX_PARSED_TRACKS_PER_PAGE: usize = 240;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -103,7 +104,7 @@ fn parse_tracks_from_html(html: &str) -> Vec<HitmosTrack> {
     let mut dedupe = HashSet::new();
     let mut tracks = Vec::new();
 
-    for item in document.select(&item_selector).take(80) {
+    for item in document.select(&item_selector).take(MAX_PARSED_TRACKS_PER_PAGE) {
         let Some(meta_json) = item.value().attr("data-musmeta") else {
             continue;
         };

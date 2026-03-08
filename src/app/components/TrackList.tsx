@@ -10,6 +10,7 @@ interface TrackListProps {
   onToggleFavorite: (trackId: string) => void;
   onAddToPlaylist: (trackId: string) => void;
   onShowLyrics: (trackId: string) => void;
+  onOpenArtist: (trackId: string, artistName?: string) => void;
   onRemoveFromPlaylist?: (trackId: string) => void;
 }
 
@@ -22,6 +23,7 @@ export function TrackList({
   onToggleFavorite,
   onAddToPlaylist,
   onShowLyrics,
+  onOpenArtist,
   onRemoveFromPlaylist,
 }: TrackListProps) {
   const queueIds = tracks.map((track) => track.id);
@@ -39,6 +41,7 @@ export function TrackList({
           onToggleFavorite={() => onToggleFavorite(track.id)}
           onAddToPlaylist={() => onAddToPlaylist(track.id)}
           onShowLyrics={() => onShowLyrics(track.id)}
+          onOpenArtist={(artistName) => onOpenArtist(track.id, artistName)}
           onRemoveFromPlaylist={onRemoveFromPlaylist ? () => onRemoveFromPlaylist(track.id) : undefined}
         />
       ))}

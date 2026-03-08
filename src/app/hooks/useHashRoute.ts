@@ -16,6 +16,18 @@ function parseRoute(hash: string): RouteState {
     return { page: "playlists", playlistId: segments[1] };
   }
 
+  if (segments[0] === "artists" && segments[1]) {
+    if (segments[2] === "releases" && segments[3]) {
+      return { page: "release", artistId: segments[1], releaseId: segments[3] };
+    }
+
+    return { page: "artist", artistId: segments[1] };
+  }
+
+  if (segments[0] === "releases" && segments[1]) {
+    return { page: "release", releaseId: segments[1] };
+  }
+
   if (segments[0] === "favorites" || segments[0] === "playlists" || segments[0] === "search" || segments[0] === "home") {
     return { page: segments[0] };
   }
@@ -26,6 +38,18 @@ function parseRoute(hash: string): RouteState {
 function routeToHash(route: RouteState) {
   if (route.page === "playlists" && route.playlistId) {
     return `#/playlists/${route.playlistId}`;
+  }
+
+  if (route.page === "artist" && route.artistId) {
+    return `#/artists/${route.artistId}`;
+  }
+
+  if (route.page === "release" && route.releaseId) {
+    if (route.artistId) {
+      return `#/artists/${route.artistId}/releases/${route.releaseId}`;
+    }
+
+    return `#/releases/${route.releaseId}`;
   }
 
   return route.page === "home" ? "#/home" : `#/${route.page}`;
@@ -50,6 +74,7 @@ export function useHashRoute() {
 
   const navigate = (nextRoute: RouteState) => {
     const nextHash = routeToHash(nextRoute);
+
     if (window.location.hash !== nextHash) {
       window.location.hash = nextHash;
     } else {
