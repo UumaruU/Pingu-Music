@@ -181,7 +181,7 @@ function normalizeSettings(payload: unknown): Partial<PlayerSettings> {
 }
 
 function normalizeHistory(payload: unknown): ListenHistoryEntry[] {
-  return extractArrayPayload(payload)
+  const normalized = extractArrayPayload(payload)
     .map((item) => {
       const record = asRecord(item);
       if (!record) {
@@ -205,14 +205,27 @@ function normalizeHistory(payload: unknown): ListenHistoryEntry[] {
         : `${trackId}:${dayKey}`;
 
       return {
-        id,
+        id: `${trackId}:${dayKey}`,
         trackId,
         listenedAt,
         dayKey,
       } satisfies ListenHistoryEntry;
     })
-    .filter((entry): entry is ListenHistoryEntry => !!entry)
-    .sort((left, right) => Date.parse(right.listenedAt) - Date.parse(left.listenedAt));
+    .filter((entry): entry is ListenHistoryEntry => !!entry);
+
+  const deduped = new Map<string, ListenHistoryEntry>();
+
+  normalized.forEach((entry) => {
+    const existing = deduped.get(entry.id);
+
+    if (!existing || Date.parse(entry.listenedAt) > Date.parse(existing.listenedAt)) {
+      deduped.set(entry.id, entry);
+    }
+  });
+
+  return [...deduped.values()].sort(
+    (left, right) => Date.parse(right.listenedAt) - Date.parse(left.listenedAt),
+  );
 }
 
 async function requestOptional<T>(endpoints: string[], options: ApiRequestOptions = {}) {

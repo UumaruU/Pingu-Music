@@ -47,7 +47,7 @@ function sanitizeAndFilterListenHistory(
     return [];
   }
 
-  return history
+  const normalized = history
     .map((entry) => {
       if (!entry || typeof entry.trackId !== "string" || typeof entry.listenedAt !== "string") {
         return null;
@@ -65,15 +65,28 @@ function sanitizeAndFilterListenHistory(
         : getDayKey(listenedAtDate);
 
       return {
-        id: typeof entry.id === "string" && entry.id ? entry.id : `${entry.trackId}:${dayKey}`,
+        id: `${entry.trackId}:${dayKey}`,
         trackId: entry.trackId,
         listenedAt: listenedAtDate.toISOString(),
         dayKey,
       } satisfies ListenHistoryEntry;
     })
     .filter((entry): entry is ListenHistoryEntry => !!entry)
-    .filter((entry) => nowTimestamp - Date.parse(entry.listenedAt) <= LISTEN_HISTORY_TTL_MS)
-    .sort((left, right) => Date.parse(right.listenedAt) - Date.parse(left.listenedAt));
+    .filter((entry) => nowTimestamp - Date.parse(entry.listenedAt) <= LISTEN_HISTORY_TTL_MS);
+
+  const deduped = new Map<string, ListenHistoryEntry>();
+
+  normalized.forEach((entry) => {
+    const existing = deduped.get(entry.id);
+
+    if (!existing || Date.parse(entry.listenedAt) > Date.parse(existing.listenedAt)) {
+      deduped.set(entry.id, entry);
+    }
+  });
+
+  return [...deduped.values()].sort(
+    (left, right) => Date.parse(right.listenedAt) - Date.parse(left.listenedAt),
+  );
 }
 
 interface AppState {
