@@ -10,6 +10,7 @@ export interface ApiRequestOptions {
   headers?: Record<string, string>;
   body?: BodyInit | unknown;
   auth?: boolean;
+  keepalive?: boolean;
   skipRefresh?: boolean;
   signal?: AbortSignal;
   parseAs?: "json" | "text" | "void";
@@ -95,6 +96,7 @@ async function requestInternal<T>(
     auth = true,
     headers = {},
     method = "GET",
+    keepalive = false,
     signal,
     parseAs = "json",
     skipRefresh = false,
@@ -119,6 +121,7 @@ async function requestInternal<T>(
     method,
     headers: nextHeaders,
     body: serialized.body,
+    keepalive,
     signal,
   });
 

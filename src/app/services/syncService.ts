@@ -1,6 +1,6 @@
 import { ApiClientError, ApiRequestOptions, apiClient } from "./apiClient";
 import { useAppStore } from "../store/appStore";
-import { PlayerSettings, Playlist, RepeatMode, SyncStatus } from "../types";
+import { ListenHistoryEntry, PlayerSettings, Playlist, RepeatMode, SyncStatus } from "../types";
 
 interface SyncResult {
   status: SyncStatus;
@@ -16,6 +16,40 @@ const SETTINGS_PULL_ENDPOINTS = ["/sync/settings"];
 const SETTINGS_PUSH_ENDPOINTS = ["/sync/settings"];
 const HISTORY_PULL_ENDPOINTS = ["/sync/history"];
 const HISTORY_PUSH_ENDPOINTS = ["/sync/history"];
+
+const DEFAULT_PLAYER_SETTINGS: PlayerSettings = {
+  volume: 0.75,
+  muted: false,
+  repeatMode: "off",
+  shuffleEnabled: false,
+};
+
+let realtimeSyncInitialized = false;
+let realtimeSyncEnabled = false;
+let suppressedRealtimeSyncDepth = 0;
+
+const queuedSyncState = {
+  favorites: {
+    pending: null as string[] | null,
+    inFlight: null as Promise<void> | null,
+    retryTimer: null as ReturnType<typeof setTimeout> | null,
+  },
+  playlists: {
+    pending: null as Playlist[] | null,
+    inFlight: null as Promise<void> | null,
+    retryTimer: null as ReturnType<typeof setTimeout> | null,
+  },
+  settings: {
+    pending: null as Partial<PlayerSettings> | null,
+    inFlight: null as Promise<void> | null,
+    retryTimer: null as ReturnType<typeof setTimeout> | null,
+  },
+  history: {
+    pending: null as ListenHistoryEntry[] | null,
+    inFlight: null as Promise<void> | null,
+    retryTimer: null as ReturnType<typeof setTimeout> | null,
+  },
+};
 
 function dedupeTrackIds(trackIds: string[] | undefined) {
   if (!Array.isArray(trackIds)) {
@@ -146,6 +180,41 @@ function normalizeSettings(payload: unknown): Partial<PlayerSettings> {
   return nextSettings;
 }
 
+function normalizeHistory(payload: unknown): ListenHistoryEntry[] {
+  return extractArrayPayload(payload)
+    .map((item) => {
+      const record = asRecord(item);
+      if (!record) {
+        return null;
+      }
+
+      const trackId = typeof record.trackId === "string" ? record.trackId.trim() : "";
+      const listenedAt =
+        typeof record.listenedAt === "string" && record.listenedAt.trim()
+          ? record.listenedAt.trim()
+          : "";
+      const dayKey =
+        typeof record.dayKey === "string" && record.dayKey.trim() ? record.dayKey.trim() : "";
+
+      if (!trackId || !listenedAt || !dayKey) {
+        return null;
+      }
+
+      const id = typeof record.id === "string" && record.id.trim()
+        ? record.id.trim()
+        : `${trackId}:${dayKey}`;
+
+      return {
+        id,
+        trackId,
+        listenedAt,
+        dayKey,
+      } satisfies ListenHistoryEntry;
+    })
+    .filter((entry): entry is ListenHistoryEntry => !!entry)
+    .sort((left, right) => Date.parse(right.listenedAt) - Date.parse(left.listenedAt));
+}
+
 async function requestOptional<T>(endpoints: string[], options: ApiRequestOptions = {}) {
   for (const endpoint of endpoints) {
     try {
@@ -186,14 +255,6 @@ async function writeOptional(
   }
 }
 
-function normalizePlaylistName(name: string) {
-  return name.trim().toLocaleLowerCase("ru-RU");
-}
-
-function unionTrackIds(primary: string[], secondary: string[]) {
-  return [...new Set([...primary, ...secondary])];
-}
-
 function updateTrackFavorites(favoriteIds: string[]) {
   const favoriteSet = new Set(favoriteIds);
   const state = useAppStore.getState();
@@ -206,145 +267,195 @@ function updateTrackFavorites(favoriteIds: string[]) {
       },
     ]),
   );
+  const nextDownloadedTracks = Object.fromEntries(
+    Object.entries(state.downloadedTracks).map(([trackId, track]) => [
+      trackId,
+      {
+        ...track,
+        isFavorite: favoriteSet.has(trackId),
+      },
+    ]),
+  );
 
-  useAppStore.setState({ tracks: nextTracks });
+  useAppStore.setState({ tracks: nextTracks, downloadedTracks: nextDownloadedTracks });
+}
+
+async function runQueuedSync<T>(
+  state: {
+    pending: T | null;
+    inFlight: Promise<void> | null;
+    retryTimer: ReturnType<typeof setTimeout> | null;
+  },
+  push: (snapshot: T) => Promise<void>,
+  label: string,
+) {
+  if (state.retryTimer) {
+    clearTimeout(state.retryTimer);
+    state.retryTimer = null;
+  }
+
+  if (state.inFlight) {
+    return state.inFlight;
+  }
+
+  state.inFlight = (async () => {
+    if (!realtimeSyncEnabled || suppressedRealtimeSyncDepth > 0) {
+      state.pending = null;
+      return;
+    }
+
+    try {
+      while (state.pending !== null) {
+        const snapshot = state.pending;
+        state.pending = null;
+
+        try {
+          await push(snapshot);
+        } catch (error) {
+          if (state.pending === null) {
+            state.pending = snapshot;
+          }
+
+          throw error;
+        }
+      }
+    } catch (error) {
+      console.error(`[sync] Failed to push ${label}`, { error });
+      state.retryTimer = setTimeout(() => {
+        state.retryTimer = null;
+        if (state.pending !== null && realtimeSyncEnabled && suppressedRealtimeSyncDepth === 0) {
+          void runQueuedSync(state, push, label);
+        }
+      }, 3000);
+    } finally {
+      state.inFlight = null;
+
+      if (
+        state.pending !== null &&
+        realtimeSyncEnabled &&
+        suppressedRealtimeSyncDepth === 0 &&
+        !state.retryTimer
+      ) {
+        void runQueuedSync(state, push, label);
+      }
+    }
+  })();
+
+  return state.inFlight;
+}
+
+async function withRealtimeSyncSuppressed<T>(action: () => Promise<T> | T) {
+  suppressedRealtimeSyncDepth += 1;
+
+  try {
+    return await action();
+  } finally {
+    suppressedRealtimeSyncDepth = Math.max(0, suppressedRealtimeSyncDepth - 1);
+  }
 }
 
 export const syncService = {
-  mergeFavorites(localFavorites: string[], remoteFavorites: string[]) {
-    return [...new Set([...localFavorites, ...remoteFavorites])];
+  enableRealtimeSync() {
+    realtimeSyncEnabled = true;
   },
 
-  mergePlaylists(localPlaylists: Playlist[], remotePlaylists: Playlist[]) {
-    const result = remotePlaylists.map((playlist) => ({
-      ...playlist,
-      trackIds: dedupeTrackIds(playlist.trackIds),
-    }));
-    const byName = new Map<string, number>();
-    const conflictNames: string[] = [];
-    const localConflicts: Playlist[] = [];
+  disableRealtimeSync() {
+    realtimeSyncEnabled = false;
 
-    result.forEach((playlist, index) => {
-      byName.set(normalizePlaylistName(playlist.name), index);
-    });
+    for (const state of Object.values(queuedSyncState)) {
+      state.pending = null;
 
-    localPlaylists.forEach((localPlaylist) => {
-      const normalizedName = normalizePlaylistName(localPlaylist.name);
-      const remoteIndex = byName.get(normalizedName);
-      const localTrackIds = dedupeTrackIds(localPlaylist.trackIds);
-
-      if (remoteIndex === undefined) {
-        result.push({
-          ...localPlaylist,
-          trackIds: localTrackIds,
-        });
-        byName.set(normalizedName, result.length - 1);
-        return;
+      if (state.retryTimer) {
+        clearTimeout(state.retryTimer);
+        state.retryTimer = null;
       }
-
-      const remotePlaylist = result[remoteIndex];
-      const mergedTrackIds = unionTrackIds(remotePlaylist.trackIds, localTrackIds);
-      const hasRealConflict =
-        remotePlaylist.trackIds.length > 0 &&
-        localTrackIds.length > 0 &&
-        remotePlaylist.trackIds.some((trackId) => !localTrackIds.includes(trackId));
-
-      result[remoteIndex] = {
-        ...remotePlaylist,
-        trackIds: mergedTrackIds,
-      };
-
-      if (hasRealConflict) {
-        conflictNames.push(localPlaylist.name);
-        localConflicts.push({
-          ...localPlaylist,
-          id: crypto.randomUUID(),
-          name: `${localPlaylist.name} (локальный)`,
-          trackIds: localTrackIds,
-          createdAt: new Date().toISOString(),
-        });
-      }
-    });
-
-    return {
-      playlists: [...result, ...localConflicts],
-      conflictNames,
-    };
+    }
   },
 
-  mergeSettings(localSettings: PlayerSettings, remoteSettings: Partial<PlayerSettings>) {
-    return {
-      ...remoteSettings,
-      ...localSettings,
-    };
+  initializeRealtimeSync() {
+    if (realtimeSyncInitialized) {
+      return;
+    }
+
+    realtimeSyncInitialized = true;
+
+    let previousFavorites = useAppStore.getState().favorites;
+    let previousPlaylists = useAppStore.getState().playlists;
+    let previousSettings = useAppStore.getState().playerSettings;
+    let previousHistory = useAppStore.getState().listenHistory;
+
+    useAppStore.subscribe((state) => {
+      const { favorites, playlists, playerSettings, listenHistory } = state;
+
+      if (realtimeSyncEnabled && suppressedRealtimeSyncDepth === 0) {
+        if (favorites !== previousFavorites) {
+          void this.queueFavoritesPush(favorites);
+        }
+
+        if (playlists !== previousPlaylists) {
+          void this.queuePlaylistsPush(playlists);
+        }
+
+        if (playerSettings !== previousSettings) {
+          void this.queueSettingsPush(playerSettings);
+        }
+
+        if (listenHistory !== previousHistory) {
+          void this.queueHistoryPush(listenHistory);
+        }
+      }
+
+      previousFavorites = favorites;
+      previousPlaylists = playlists;
+      previousSettings = playerSettings;
+      previousHistory = listenHistory;
+    });
   },
 
   async pullHistory() {
     const payload = await requestOptional<unknown>(HISTORY_PULL_ENDPOINTS, {
       auth: true,
     });
-    return extractArrayPayload(payload);
+    return normalizeHistory(payload);
   },
 
-  async pushHistory(historyPayload: unknown) {
+  async pushHistory(historyPayload: ListenHistoryEntry[]) {
     await writeOptional(HISTORY_PUSH_ENDPOINTS, {
       method: "PUT",
       body: { entries: historyPayload },
+      keepalive: true,
       parseAs: "void",
     });
   },
 
   async syncAfterLogin() {
-    const localState = useAppStore.getState();
-    const [remoteFavorites, remotePlaylists, remoteSettings] = await Promise.all([
-      this.pullFavorites().catch(() => []),
-      this.pullPlaylists().catch(() => []),
-      this.pullSettings().catch(() => ({})),
-    ]);
-
-    const hasLocalData = localState.favorites.length > 0 || localState.playlists.length > 0;
-    const hasRemoteData =
-      remoteFavorites.length > 0 ||
-      remotePlaylists.length > 0 ||
-      Object.keys(remoteSettings).length > 0;
-    const shouldPromptMerge = hasLocalData && hasRemoteData;
-
-    if (shouldPromptMerge && typeof window !== "undefined") {
-      const shouldMerge = window.confirm(
-        "Найдены локальные и облачные данные. Объединить их сейчас?",
-      );
-
-      if (!shouldMerge) {
-        return {
-          status: "synced",
-          merged: false,
-          conflictNames: [],
-        } satisfies SyncResult;
-      }
-    }
-
-    const mergedFavorites = this.mergeFavorites(localState.favorites, remoteFavorites);
-    const mergedPlaylists = this.mergePlaylists(localState.playlists, remotePlaylists);
-    const mergedSettings = this.mergeSettings(localState.playerSettings, remoteSettings);
-
-    useAppStore.setState({
-      favorites: mergedFavorites,
-      playlists: mergedPlaylists.playlists,
-      playerSettings: mergedSettings,
-    });
-    updateTrackFavorites(mergedFavorites);
-
-    await Promise.allSettled([
-      this.pushFavorites(mergedFavorites),
-      this.pushPlaylists(mergedPlaylists.playlists),
-      this.pushSettings(mergedSettings),
+    const [remoteFavorites, remotePlaylists, remoteSettings, remoteHistory] = await Promise.all([
+      this.pullFavorites(),
+      this.pullPlaylists(),
+      this.pullSettings(),
       this.pullHistory(),
     ]);
 
+    const nextSettings: PlayerSettings = {
+      ...DEFAULT_PLAYER_SETTINGS,
+      ...remoteSettings,
+    };
+
+    await withRealtimeSyncSuppressed(() => {
+      useAppStore.setState({
+        favorites: remoteFavorites,
+        playlists: remotePlaylists,
+        playerSettings: nextSettings,
+        listenHistory: remoteHistory,
+      });
+      updateTrackFavorites(remoteFavorites);
+    });
+    this.enableRealtimeSync();
+
     return {
       status: "synced",
-      merged: true,
-      conflictNames: mergedPlaylists.conflictNames,
+      merged: false,
+      conflictNames: [],
     } satisfies SyncResult;
   },
 
@@ -360,6 +471,7 @@ export const syncService = {
     await writeOptional(FAVORITES_PUSH_ENDPOINTS, {
       method: "PUT",
       body: { trackIds: favorites },
+      keepalive: true,
       parseAs: "void",
     });
   },
@@ -376,6 +488,7 @@ export const syncService = {
     await writeOptional(PLAYLISTS_PUSH_ENDPOINTS, {
       method: "PUT",
       body: { playlists },
+      keepalive: true,
       parseAs: "void",
     });
   },
@@ -392,8 +505,47 @@ export const syncService = {
     await writeOptional(SETTINGS_PUSH_ENDPOINTS, {
       method: "PUT",
       body: { settings },
+      keepalive: true,
       parseAs: "void",
     });
   },
-};
 
+  queueFavoritesPush(favorites: string[]) {
+    queuedSyncState.favorites.pending = [...favorites];
+    return runQueuedSync(
+      queuedSyncState.favorites,
+      (snapshot) => this.pushFavorites(snapshot),
+      "favorites",
+    );
+  },
+
+  queuePlaylistsPush(playlists: Playlist[]) {
+    queuedSyncState.playlists.pending = playlists.map((playlist) => ({
+      ...playlist,
+      trackIds: [...playlist.trackIds],
+    }));
+    return runQueuedSync(
+      queuedSyncState.playlists,
+      (snapshot) => this.pushPlaylists(snapshot),
+      "playlists",
+    );
+  },
+
+  queueSettingsPush(settings: Partial<PlayerSettings>) {
+    queuedSyncState.settings.pending = { ...settings };
+    return runQueuedSync(
+      queuedSyncState.settings,
+      (snapshot) => this.pushSettings(snapshot),
+      "settings",
+    );
+  },
+
+  queueHistoryPush(history: ListenHistoryEntry[]) {
+    queuedSyncState.history.pending = history.map((entry) => ({ ...entry }));
+    return runQueuedSync(
+      queuedSyncState.history,
+      (snapshot) => this.pushHistory(snapshot),
+      "history",
+    );
+  },
+};

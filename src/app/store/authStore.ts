@@ -64,6 +64,7 @@ export const useAuthStore = create<AuthStoreState>()((set, get) => ({
   hasRestoredSession: false,
 
   async login(payload) {
+    syncService.disableRealtimeSync();
     set({
       isLoading: true,
       authError: null,
@@ -106,6 +107,7 @@ export const useAuthStore = create<AuthStoreState>()((set, get) => ({
   },
 
   async register(payload) {
+    syncService.disableRealtimeSync();
     set({
       isLoading: true,
       authError: null,
@@ -148,6 +150,7 @@ export const useAuthStore = create<AuthStoreState>()((set, get) => ({
   },
 
   async logout() {
+    syncService.disableRealtimeSync();
     const refreshToken = await sessionService.getRefreshToken();
 
     try {
@@ -169,6 +172,7 @@ export const useAuthStore = create<AuthStoreState>()((set, get) => ({
       return;
     }
 
+    syncService.disableRealtimeSync();
     set({
       isRestoring: true,
       isLoading: true,
@@ -229,6 +233,7 @@ export const useAuthStore = create<AuthStoreState>()((set, get) => ({
     const refreshToken = await sessionService.getRefreshToken();
 
     if (!refreshToken) {
+      syncService.disableRealtimeSync();
       sessionService.clearAccessToken();
       set({
         ...buildGuestState(),
@@ -254,6 +259,7 @@ export const useAuthStore = create<AuthStoreState>()((set, get) => ({
 
       return refreshedTokens.accessToken;
     } catch {
+      syncService.disableRealtimeSync();
       await get().logout();
       return null;
     }
@@ -267,6 +273,7 @@ export const useAuthStore = create<AuthStoreState>()((set, get) => ({
   },
 
   clearAuthState() {
+    syncService.disableRealtimeSync();
     sessionService.clearAccessToken();
     void sessionService.clearRefreshToken();
     set({
@@ -277,4 +284,3 @@ export const useAuthStore = create<AuthStoreState>()((set, get) => ({
 }));
 
 apiClient.setRefreshHandler(async () => useAuthStore.getState().refreshSession());
-

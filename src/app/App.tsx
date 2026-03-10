@@ -12,6 +12,7 @@ import { HomePage } from "./pages/HomePage";
 import { useAppStore } from "./store/appStore";
 import { useAuthStore } from "./store/authStore";
 import { ListenHistoryEntry, RouteId, Track } from "./types";
+import { syncService } from "./services/syncService";
 
 type NowPlayingViewMode = "cover" | "details";
 
@@ -426,6 +427,10 @@ export default function App() {
   const [nowPlayingViewMode, setNowPlayingViewMode] = useState<NowPlayingViewMode>("cover");
   const debouncedSearchValue = useDebouncedValue(searchValue, 350);
   const isAuthRoute = route.page === "login" || route.page === "register";
+
+  useEffect(() => {
+    syncService.initializeRealtimeSync();
+  }, []);
 
   useEffect(() => {
     void restoreSession();
