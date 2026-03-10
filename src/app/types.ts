@@ -1,4 +1,13 @@
-export type RouteId = "home" | "favorites" | "playlists" | "search" | "artist" | "release";
+export type RouteId =
+  | "home"
+  | "history"
+  | "favorites"
+  | "playlists"
+  | "search"
+  | "login"
+  | "register"
+  | "artist"
+  | "release";
 
 export type RepeatMode = "off" | "one" | "all";
 export type DownloadState = "idle" | "downloading" | "downloaded" | "error";
@@ -6,6 +15,9 @@ export type SearchStatus = "idle" | "loading" | "success" | "empty" | "error";
 export type MetadataStatus = "raw" | "matching" | "matched" | "enriched" | "failed";
 export type LyricsStatus = "missing" | "loading" | "ready" | "failed";
 export type EntityLoadStatus = "idle" | "loading" | "ready" | "failed";
+export type AuthStatus = "idle" | "loading" | "authenticated" | "guest" | "error";
+export type SyncStatus = "idle" | "syncing" | "synced" | "error";
+export type AuthError = string | null;
 
 export interface Track {
   id: string;
@@ -89,9 +101,48 @@ export interface RecentSearch {
   createdAt: string;
 }
 
+export interface ListenHistoryEntry {
+  id: string;
+  trackId: string;
+  listenedAt: string;
+  dayKey: string;
+}
+
+export interface LocalDownloadEntry {
+  trackId: string;
+  localPath: string;
+}
+
 export interface RouteState {
   page: RouteId;
   playlistId?: string;
   artistId?: string;
   releaseId?: string;
+}
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  name?: string;
+  avatarUrl?: string;
+}
+
+export interface AuthTokens {
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt?: string;
+}
+
+export interface AuthSession {
+  user: AuthUser;
+  tokens: AuthTokens;
+}
+
+export interface AuthState {
+  user: AuthUser | null;
+  accessToken: string | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  authError: AuthError;
+  status: AuthStatus;
 }

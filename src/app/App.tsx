@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Music2 } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { BrandMark } from "./components/BrandMark";
+import { AppVersionBadge } from "./components/AppVersionBadge";
 import { PlayerBar } from "./components/PlayerBar";
 import { SearchBar } from "./components/SearchBar";
 import { Sidebar } from "./components/Sidebar";
@@ -9,10 +10,16 @@ import { useDebouncedValue } from "./hooks/useDebouncedValue";
 import { useHashRoute } from "./hooks/useHashRoute";
 import { HomePage } from "./pages/HomePage";
 import { useAppStore } from "./store/appStore";
-import { RouteId, Track } from "./types";
+import { useAuthStore } from "./store/authStore";
+import { ListenHistoryEntry, RouteId, Track } from "./types";
+
+type NowPlayingViewMode = "cover" | "details";
 
 const FavoritesPage = lazy(() =>
   import("./pages/FavoritesPage").then((module) => ({ default: module.FavoritesPage })),
+);
+const HistoryPage = lazy(() =>
+  import("./pages/HistoryPage").then((module) => ({ default: module.HistoryPage })),
 );
 const PlaylistDetailsPage = lazy(() =>
   import("./pages/PlaylistDetailsPage").then((module) => ({
@@ -30,6 +37,12 @@ const ArtistPage = lazy(() =>
 );
 const ReleasePage = lazy(() =>
   import("./pages/ReleasePage").then((module) => ({ default: module.ReleasePage })),
+);
+const LoginPage = lazy(() =>
+  import("./pages/LoginPage").then((module) => ({ default: module.LoginPage })),
+);
+const RegisterPage = lazy(() =>
+  import("./pages/RegisterPage").then((module) => ({ default: module.RegisterPage })),
 );
 const AddToPlaylistModal = lazy(() =>
   import("./components/AddToPlaylistModal").then((module) => ({
@@ -51,6 +64,8 @@ const loadArtistService = () =>
   import("./services/artistService").then((module) => module.artistService);
 const loadCacheService = () =>
   import("./services/cacheService").then((module) => module.cacheService);
+const loadDownloadService = () =>
+  import("./services/downloadService").then((module) => module.downloadService);
 const loadFavoritesService = () =>
   import("./services/favoritesService").then((module) => module.favoritesService);
 const loadLyricsService = () =>
@@ -70,10 +85,14 @@ function getTracksByIds(tracks: Record<string, Track>, ids: string[]) {
   return ids.map((id) => tracks[id]).filter(Boolean);
 }
 
+function sortHistoryByDateDesc(left: ListenHistoryEntry, right: ListenHistoryEntry) {
+  return Date.parse(right.listenedAt) - Date.parse(left.listenedAt);
+}
+
 function PageLoader() {
   return (
     <div className="rounded-[32px] border border-white/10 bg-white/[0.03] p-8 text-sm text-white/55 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
-      Loading section...
+      Загрузка...
     </div>
   );
 }
@@ -81,13 +100,11 @@ function PageLoader() {
 function PlayerBarContainer({
   onAddToPlaylist,
   onOpenArtist,
-  onShowDetails,
   onOpenNowPlaying,
 }: {
   onAddToPlaylist: (trackId: string) => void;
   onOpenArtist: (trackId: string, artistName?: string) => void;
-  onShowDetails: (trackId: string) => void;
-  onOpenNowPlaying: () => void;
+  onOpenNowPlaying: (viewMode: NowPlayingViewMode) => void;
 }) {
   const playerState = useAppStore(
     useShallow((state) => ({
@@ -135,7 +152,7 @@ function PlayerBarContainer({
       }}
       onShowLyrics={() => {
         if (playerState.currentTrack) {
-          onShowDetails(playerState.currentTrack.id);
+          onOpenNowPlaying("details");
         }
       }}
       onToggleFavorite={() => {
@@ -157,7 +174,7 @@ function PlayerBarContainer({
       }}
       onOpenNowPlaying={() => {
         if (playerState.currentTrack) {
-          onOpenNowPlaying();
+          onOpenNowPlaying("cover");
         }
       }}
     />
@@ -166,20 +183,25 @@ function PlayerBarContainer({
 
 function NowPlayingModalContainer({
   open,
+  viewMode,
+  onViewModeChange,
   onClose,
   onAddToPlaylist,
   onOpenArtist,
-  onShowDetails,
 }: {
   open: boolean;
+  viewMode: NowPlayingViewMode;
+  onViewModeChange: (viewMode: NowPlayingViewMode) => void;
   onClose: () => void;
   onAddToPlaylist: (trackId: string) => void;
   onOpenArtist: (trackId: string, artistName?: string) => void;
-  onShowDetails: (trackId: string) => void;
 }) {
   const playerState = useAppStore(
     useShallow((state) => ({
       currentTrack: state.currentTrackId ? state.tracks[state.currentTrackId] ?? null : null,
+      artists: state.artists,
+      releases: state.releases,
+      lyricsByTrackId: state.lyricsByTrackId,
       isPlaying: state.isPlaying,
       progress: state.progress,
       duration: state.duration,
@@ -187,16 +209,50 @@ function NowPlayingModalContainer({
     })),
   );
 
-  if (!open || !playerState.currentTrack) {
+  const currentTrack = playerState.currentTrack;
+  const artist = currentTrack?.musicBrainzArtistId
+    ? playerState.artists[currentTrack.musicBrainzArtistId]
+    : undefined;
+  const release = currentTrack?.musicBrainzReleaseId
+    ? playerState.releases[currentTrack.musicBrainzReleaseId]
+    : undefined;
+  const lyrics = currentTrack ? playerState.lyricsByTrackId[currentTrack.id] : undefined;
+
+  useEffect(() => {
+    if (!open || !currentTrack) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void Promise.all([loadMetadataEnrichmentService(), loadLyricsService()]).then(
+      ([metadataEnrichmentService, lyricsService]) => {
+        if (cancelled) {
+          return;
+        }
+
+        void metadataEnrichmentService.enrichTrack(currentTrack.id);
+        void lyricsService.getLyrics(currentTrack.id);
+      },
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentTrack?.id, open]);
+
+  if (!open || !currentTrack) {
     return null;
   }
-
-  const currentTrack = playerState.currentTrack;
 
   return (
     <Suspense fallback={null}>
       <NowPlayingModal
         currentTrack={currentTrack}
+        artist={artist}
+        release={release}
+        lyrics={lyrics}
+        viewMode={viewMode}
         isPlaying={playerState.isPlaying}
         progress={playerState.progress}
         duration={playerState.duration}
@@ -229,7 +285,7 @@ function NowPlayingModalContainer({
         onCycleRepeatMode={() => {
           void loadPlayerService().then((playerService) => playerService.cycleRepeatMode());
         }}
-        onShowLyrics={() => onShowDetails(currentTrack.id)}
+        onChangeViewMode={onViewModeChange}
         onToggleFavorite={() => {
           void loadFavoritesService().then((favoritesService) =>
             favoritesService.toggle(currentTrack.id),
@@ -237,6 +293,11 @@ function NowPlayingModalContainer({
         }}
         onAddToPlaylist={() => onAddToPlaylist(currentTrack.id)}
         onOpenArtist={(artistName) => onOpenArtist(currentTrack.id, artistName)}
+        onSeekToLyrics={(seconds) => {
+          void loadPlayerService().then((playerService) =>
+            playerService.seekToTrackPosition(currentTrack.id, seconds, [currentTrack.id]),
+          );
+        }}
       />
     </Suspense>
   );
@@ -244,8 +305,10 @@ function NowPlayingModalContainer({
 
 function TrackDetailsModalContainer({
   onOpenArtist,
+  onSeekToLyrics,
 }: {
   onOpenArtist: (trackId: string, artistName?: string) => void;
+  onSeekToLyrics: (trackId: string, seconds: number) => void;
 }) {
   const detailsState = useAppStore(
     useShallow((state) => ({
@@ -254,6 +317,8 @@ function TrackDetailsModalContainer({
       artists: state.artists,
       releases: state.releases,
       lyricsByTrackId: state.lyricsByTrackId,
+      currentTrackId: state.currentTrackId,
+      progress: state.progress,
     })),
   );
   const setDetailsTrackId = useAppStore((state) => state.setDetailsTrackId);
@@ -306,8 +371,11 @@ function TrackDetailsModalContainer({
         artist={artist}
         release={release}
         lyrics={lyrics}
+        currentTrackId={detailsState.currentTrackId}
+        currentProgress={detailsState.progress}
         onClose={() => setDetailsTrackId(null)}
         onOpenArtist={(artistName) => onOpenArtist(track.id, artistName)}
+        onSeekToLyrics={(seconds) => onSeekToLyrics(track.id, seconds)}
       />
     </Suspense>
   );
@@ -315,6 +383,19 @@ function TrackDetailsModalContainer({
 
 export default function App() {
   const { route, navigate } = useHashRoute();
+  const authState = useAuthStore(
+    useShallow((state) => ({
+      user: state.user,
+      isAuthenticated: state.isAuthenticated,
+      isLoading: state.isLoading,
+      authError: state.authError,
+      hasRestoredSession: state.hasRestoredSession,
+    })),
+  );
+  const restoreSession = useAuthStore((state) => state.restoreSession);
+  const login = useAuthStore((state) => state.login);
+  const register = useAuthStore((state) => state.register);
+  const logout = useAuthStore((state) => state.logout);
   const appState = useAppStore(
     useShallow((state) => ({
       tracks: state.tracks,
@@ -329,6 +410,7 @@ export default function App() {
       searchStatus: state.searchStatus,
       searchError: state.searchError,
       recentSearches: state.recentSearches,
+      listenHistory: state.listenHistory,
       favorites: state.favorites,
       playlists: state.playlists,
       currentTrackId: state.currentTrackId,
@@ -336,22 +418,36 @@ export default function App() {
     })),
   );
   const addRecentSearch = useAppStore((state) => state.addRecentSearch);
+  const cleanupListenHistory = useAppStore((state) => state.cleanupListenHistory);
   const setDetailsTrackId = useAppStore((state) => state.setDetailsTrackId);
   const [searchValue, setSearchValue] = useState(() => useAppStore.getState().searchQuery);
   const [playlistModalTrackId, setPlaylistModalTrackId] = useState<string | null>(null);
   const [isNowPlayingOpen, setNowPlayingOpen] = useState(false);
+  const [nowPlayingViewMode, setNowPlayingViewMode] = useState<NowPlayingViewMode>("cover");
   const debouncedSearchValue = useDebouncedValue(searchValue, 350);
+  const isAuthRoute = route.page === "login" || route.page === "register";
+
+  useEffect(() => {
+    void restoreSession();
+  }, [restoreSession]);
 
   useEffect(() => {
     let cancelled = false;
+    cleanupListenHistory();
 
-    void Promise.all([loadPlayerService(), loadCacheService()]).then(
-      ([playerService, cacheService]) => {
+    void Promise.all([loadPlayerService(), loadCacheService(), loadDownloadService()]).then(
+      async ([playerService, cacheService, downloadService]) => {
         if (cancelled) {
           return;
         }
 
         playerService.initialize();
+        await downloadService.restoreDownloadsFromDisk();
+
+        if (cancelled) {
+          return;
+        }
+
         playerService.hydrateFromStore();
         void cacheService.cleanupExpired();
       },
@@ -360,7 +456,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [cleanupListenHistory]);
 
   useEffect(() => {
     if (route.page !== "home") {
@@ -373,8 +469,20 @@ export default function App() {
   useEffect(() => {
     if (!appState.currentTrackId) {
       setNowPlayingOpen(false);
+      setNowPlayingViewMode("cover");
     }
   }, [appState.currentTrackId]);
+
+  useEffect(() => {
+    if (!isAuthRoute) {
+      return;
+    }
+
+    setNowPlayingOpen(false);
+    setPlaylistModalTrackId(null);
+    setDetailsTrackId(null);
+    setNowPlayingViewMode("cover");
+  }, [isAuthRoute, setDetailsTrackId]);
 
   useEffect(() => {
     if (route.page !== "search") {
@@ -416,6 +524,31 @@ export default function App() {
     () => getTracksByIds(appState.tracks, appState.favorites),
     [appState.favorites, appState.tracks],
   );
+  const listenHistorySections = useMemo(() => {
+    const groupedByDay = new Map<string, Track[]>();
+
+    [...appState.listenHistory]
+      .sort(sortHistoryByDateDesc)
+      .forEach((entry) => {
+        const track = appState.tracks[entry.trackId];
+
+        if (!track) {
+          return;
+        }
+
+        const dayTracks = groupedByDay.get(entry.dayKey);
+        if (dayTracks) {
+          dayTracks.push(track);
+          return;
+        }
+
+        groupedByDay.set(entry.dayKey, [track]);
+      });
+
+    return Array.from(groupedByDay.entries())
+      .map(([dayKey, tracks]) => ({ dayKey, tracks }))
+      .filter((section) => section.tracks.length > 0);
+  }, [appState.listenHistory, appState.tracks]);
   const recentQueries = useMemo(
     () => appState.recentSearches.map((item) => item.query),
     [appState.recentSearches],
@@ -607,8 +740,40 @@ export default function App() {
   };
 
   const renderPage = () => {
+    if (route.page === "login") {
+      return (
+        <LoginPage
+          isLoading={authState.isLoading}
+          error={authState.authError}
+          onLogin={async (payload) => {
+            await login(payload);
+            navigate({ page: "home" });
+          }}
+          onOpenRegister={() => navigate({ page: "register" })}
+        />
+      );
+    }
+
+    if (route.page === "register") {
+      return (
+        <RegisterPage
+          isLoading={authState.isLoading}
+          error={authState.authError}
+          onRegister={async (payload) => {
+            await register(payload);
+            navigate({ page: "home" });
+          }}
+          onOpenLogin={() => navigate({ page: "login" })}
+        />
+      );
+    }
+
     if (route.page === "favorites") {
       return <FavoritesPage tracks={favoriteTracks} {...pageActions} />;
+    }
+
+    if (route.page === "history") {
+      return <HistoryPage sections={listenHistorySections} {...pageActions} />;
     }
 
     if (route.page === "search") {
@@ -701,7 +866,16 @@ export default function App() {
   return (
     <div className="h-screen overflow-hidden bg-[radial-gradient(circle_at_top,#1f2937,transparent_28%),linear-gradient(180deg,#06070b,#0b0d11_45%,#090b0f)] text-white">
       <div className="flex h-full">
-        <Sidebar activePage={route.page} onNavigate={handleRouteChange} />
+        <Sidebar
+          activePage={route.page}
+          onNavigate={handleRouteChange}
+          user={authState.user}
+          isAuthenticated={authState.isAuthenticated}
+          isAuthLoading={authState.isLoading}
+          onLogout={() => {
+            void logout();
+          }}
+        />
 
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <header className="shrink-0 border-b border-white/6 px-5 py-5 sm:px-6">
@@ -713,79 +887,103 @@ export default function App() {
                   Russian UI
                 </div>
               </div>
-              <SearchBar
-                value={searchValue}
-                recentQueries={recentQueries}
-                onChange={handleSearchChange}
-                onSubmit={handleSearchSubmit}
-                onClear={handleSearchClear}
-                onSelectRecentQuery={handleSelectRecentQuery}
-              />
+              {!isAuthRoute ? (
+                <SearchBar
+                  value={searchValue}
+                  recentQueries={recentQueries}
+                  onChange={handleSearchChange}
+                  onSubmit={handleSearchSubmit}
+                  onClear={handleSearchClear}
+                  onSelectRecentQuery={handleSelectRecentQuery}
+                />
+              ) : null}
             </div>
           </header>
 
-          <main className="scrollbar-none min-h-0 flex-1 overflow-y-auto px-5 py-6 pb-40 sm:px-6">
+          <main
+            className={`scrollbar-none min-h-0 flex-1 overflow-y-auto px-5 py-6 sm:px-6 ${
+              isAuthRoute ? "pb-8" : "pb-40"
+            }`}
+          >
             <div className="mx-auto w-full max-w-[1500px]">
               <Suspense fallback={<PageLoader />}>{renderPage()}</Suspense>
             </div>
           </main>
 
-          <div className="shrink-0">
-            <PlayerBarContainer
-              onAddToPlaylist={(trackId) => setPlaylistModalTrackId(trackId)}
-              onOpenArtist={(trackId, artistName) => {
-                void handleOpenArtist(trackId, artistName);
-              }}
-              onShowDetails={(trackId) => setDetailsTrackId(trackId)}
-              onOpenNowPlaying={() => setNowPlayingOpen(true)}
-            />
-          </div>
+          {!isAuthRoute ? (
+            <div className="shrink-0">
+              <PlayerBarContainer
+                onAddToPlaylist={(trackId) => setPlaylistModalTrackId(trackId)}
+                onOpenArtist={(trackId, artistName) => {
+                  void handleOpenArtist(trackId, artistName);
+                }}
+                onOpenNowPlaying={(viewMode) => {
+                  setNowPlayingViewMode(viewMode);
+                  setNowPlayingOpen(true);
+                }}
+              />
+            </div>
+          ) : null}
         </div>
       </div>
 
-      <NowPlayingModalContainer
-        open={isNowPlayingOpen}
-        onClose={() => setNowPlayingOpen(false)}
-        onAddToPlaylist={(trackId) => {
-          setPlaylistModalTrackId(trackId);
-          setNowPlayingOpen(false);
-        }}
-        onOpenArtist={(trackId, artistName) => {
-          setNowPlayingOpen(false);
-          void handleOpenArtist(trackId, artistName);
-        }}
-        onShowDetails={(trackId) => {
-          setNowPlayingOpen(false);
-          setDetailsTrackId(trackId);
-        }}
-      />
+      {!isAuthRoute ? (
+        <>
+          <NowPlayingModalContainer
+            open={isNowPlayingOpen}
+            viewMode={nowPlayingViewMode}
+            onViewModeChange={setNowPlayingViewMode}
+            onClose={() => {
+              setNowPlayingOpen(false);
+              setNowPlayingViewMode("cover");
+            }}
+            onAddToPlaylist={(trackId) => {
+              setPlaylistModalTrackId(trackId);
+              setNowPlayingOpen(false);
+              setNowPlayingViewMode("cover");
+            }}
+            onOpenArtist={(trackId, artistName) => {
+              setNowPlayingOpen(false);
+              setNowPlayingViewMode("cover");
+              void handleOpenArtist(trackId, artistName);
+            }}
+          />
 
-      {playlistModalTrack ? (
-        <Suspense fallback={null}>
-          <AddToPlaylistModal
-            track={playlistModalTrack}
-            playlists={appState.playlists}
-            onClose={() => setPlaylistModalTrackId(null)}
-            onAddToPlaylist={(playlistId) => {
-              if (!playlistModalTrackId) {
-                return;
-              }
+          {playlistModalTrack ? (
+            <Suspense fallback={null}>
+              <AddToPlaylistModal
+                track={playlistModalTrack}
+                playlists={appState.playlists}
+                onClose={() => setPlaylistModalTrackId(null)}
+                onAddToPlaylist={(playlistId) => {
+                  if (!playlistModalTrackId) {
+                    return;
+                  }
 
-              void loadPlaylistService().then((playlistService) => {
-                playlistService.addTrackToPlaylist(playlistId, playlistModalTrackId);
-                setPlaylistModalTrackId(null);
+                  void loadPlaylistService().then((playlistService) => {
+                    playlistService.addTrackToPlaylist(playlistId, playlistModalTrackId);
+                    setPlaylistModalTrackId(null);
+                  });
+                }}
+                onCreatePlaylist={handleCreatePlaylist}
+              />
+            </Suspense>
+          ) : null}
+
+          <TrackDetailsModalContainer
+            onOpenArtist={(trackId, artistName) => {
+              void handleOpenArtist(trackId, artistName);
+            }}
+            onSeekToLyrics={(trackId, seconds) => {
+              void loadPlayerService().then((playerService) => {
+                playerService.seekToTrackPosition(trackId, seconds, [trackId]);
               });
             }}
-            onCreatePlaylist={handleCreatePlaylist}
           />
-        </Suspense>
+        </>
       ) : null}
 
-      <TrackDetailsModalContainer
-        onOpenArtist={(trackId, artistName) => {
-          void handleOpenArtist(trackId, artistName);
-        }}
-      />
+      <AppVersionBadge />
     </div>
   );
 }

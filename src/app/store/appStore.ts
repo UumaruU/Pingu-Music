@@ -3,6 +3,8 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import {
   Artist,
   EntityLoadStatus,
+  ListenHistoryEntry,
+  LocalDownloadEntry,
   Lyrics,
   PlayerSettings,
   Playlist,
@@ -25,8 +27,58 @@ const defaultPlayerSettings: PlayerSettings = {
   shuffleEnabled: false,
 };
 
+const LISTEN_HISTORY_TTL_DAYS = 60;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const LISTEN_HISTORY_TTL_MS = LISTEN_HISTORY_TTL_DAYS * DAY_MS;
+
+function getDayKey(date: Date) {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function sanitizeAndFilterListenHistory(
+  history: ListenHistoryEntry[] | undefined,
+  nowTimestamp = Date.now(),
+) {
+  if (!Array.isArray(history) || !history.length) {
+    return [];
+  }
+
+  return history
+    .map((entry) => {
+      if (!entry || typeof entry.trackId !== "string" || typeof entry.listenedAt !== "string") {
+        return null;
+      }
+
+      const listenedAtTimestamp = Date.parse(entry.listenedAt);
+
+      if (!Number.isFinite(listenedAtTimestamp)) {
+        return null;
+      }
+
+      const listenedAtDate = new Date(listenedAtTimestamp);
+      const dayKey = typeof entry.dayKey === "string" && entry.dayKey
+        ? entry.dayKey
+        : getDayKey(listenedAtDate);
+
+      return {
+        id: typeof entry.id === "string" && entry.id ? entry.id : `${entry.trackId}:${dayKey}`,
+        trackId: entry.trackId,
+        listenedAt: listenedAtDate.toISOString(),
+        dayKey,
+      } satisfies ListenHistoryEntry;
+    })
+    .filter((entry): entry is ListenHistoryEntry => !!entry)
+    .filter((entry) => nowTimestamp - Date.parse(entry.listenedAt) <= LISTEN_HISTORY_TTL_MS)
+    .sort((left, right) => Date.parse(right.listenedAt) - Date.parse(left.listenedAt));
+}
+
 interface AppState {
   tracks: TrackMap;
+  downloadedTracks: TrackMap;
   artists: ArtistMap;
   releases: ReleaseMap;
   lyricsByTrackId: LyricsMap;
@@ -40,6 +92,7 @@ interface AppState {
   searchStatus: SearchStatus;
   searchError: string | null;
   recentSearches: RecentSearch[];
+  listenHistory: ListenHistoryEntry[];
   favorites: string[];
   playlists: Playlist[];
   currentQueue: string[];
@@ -60,6 +113,8 @@ interface AppState {
     error?: string | null;
   }) => void;
   addRecentSearch: (query: string) => void;
+  addListenHistory: (trackId: string) => void;
+  cleanupListenHistory: () => void;
   toggleFavorite: (trackId: string) => boolean;
   setTrackDownloadState: (
     trackId: string,
@@ -67,6 +122,7 @@ interface AppState {
     localPath?: string,
     downloadError?: string,
   ) => void;
+  syncDownloadsFromDisk: (downloads: LocalDownloadEntry[]) => void;
   setTrackMetadata: (trackId: string, patch: Partial<Track>) => void;
   hydrateArtists: (artists: Artist[]) => void;
   upsertRelease: (release: Release) => void;
@@ -93,7 +149,16 @@ interface AppState {
 }
 
 function getPersistedTrackIds(
-  state: Pick<AppState, "favorites" | "playlists" | "currentQueue" | "originalQueue" | "currentTrackId">,
+  state: Pick<
+    AppState,
+    | "favorites"
+    | "playlists"
+    | "currentQueue"
+    | "originalQueue"
+    | "currentTrackId"
+    | "listenHistory"
+    | "downloadedTracks"
+  >,
 ) {
   const trackIds = new Set<string>();
 
@@ -107,6 +172,16 @@ function getPersistedTrackIds(
   if (state.currentTrackId) {
     trackIds.add(state.currentTrackId);
   }
+
+  state.listenHistory.forEach((entry) => {
+    if (entry.trackId) {
+      trackIds.add(entry.trackId);
+    }
+  });
+
+  Object.keys(state.downloadedTracks).forEach((trackId) => {
+    trackIds.add(trackId);
+  });
 
   return trackIds;
 }
@@ -163,6 +238,7 @@ export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
       tracks: {},
+      downloadedTracks: {},
       artists: {},
       releases: {},
       lyricsByTrackId: {},
@@ -176,6 +252,7 @@ export const useAppStore = create<AppState>()(
       searchStatus: "idle",
       searchError: null,
       recentSearches: [],
+      listenHistory: [],
       favorites: [],
       playlists: [],
       currentQueue: [],
@@ -190,13 +267,27 @@ export const useAppStore = create<AppState>()(
       hydrateCatalog: (tracks) => {
         set((state) => {
           const nextTracks = { ...state.tracks };
+          const nextDownloadedTracks = { ...state.downloadedTracks };
           const favoriteTrackIds = new Set(state.favorites);
 
           for (const track of tracks) {
             nextTracks[track.id] = mergeTrack(state.tracks[track.id], track, favoriteTrackIds);
+
+            if (state.downloadedTracks[track.id]) {
+              nextDownloadedTracks[track.id] = {
+                ...mergeTrack(state.downloadedTracks[track.id], track, favoriteTrackIds),
+                isFavorite: true,
+                downloadState: "downloaded",
+                localPath: state.downloadedTracks[track.id].localPath,
+                downloadError: undefined,
+              };
+            }
           }
 
-          return { tracks: nextTracks };
+          return {
+            tracks: nextTracks,
+            downloadedTracks: nextDownloadedTracks,
+          };
         });
       },
       setPopularTracks: (tracks) => {
@@ -234,6 +325,49 @@ export const useAppStore = create<AppState>()(
           };
         });
       },
+      addListenHistory: (trackId) => {
+        if (!trackId) {
+          return;
+        }
+
+        set((state) => {
+          const now = new Date();
+          const nowIso = now.toISOString();
+          const nowTimestamp = now.getTime();
+          const dayKey = getDayKey(now);
+          const cleanedHistory = sanitizeAndFilterListenHistory(state.listenHistory, nowTimestamp);
+          const nextId = `${trackId}:${dayKey}`;
+          const existingIndex = cleanedHistory.findIndex((entry) => entry.id === nextId);
+
+          if (existingIndex >= 0) {
+            const existing = cleanedHistory[existingIndex];
+            const nextHistory = cleanedHistory.filter((entry) => entry.id !== nextId);
+            nextHistory.unshift({
+              ...existing,
+              listenedAt: nowIso,
+            });
+
+            return { listenHistory: nextHistory };
+          }
+
+          return {
+            listenHistory: [
+              {
+                id: nextId,
+                trackId,
+                listenedAt: nowIso,
+                dayKey,
+              },
+              ...cleanedHistory,
+            ],
+          };
+        });
+      },
+      cleanupListenHistory: () => {
+        set((state) => ({
+          listenHistory: sanitizeAndFilterListenHistory(state.listenHistory),
+        }));
+      },
       toggleFavorite: (trackId) => {
         const isFavorite = !get().favorites.includes(trackId);
 
@@ -252,19 +386,108 @@ export const useAppStore = create<AppState>()(
         return isFavorite;
       },
       setTrackDownloadState: (trackId, downloadState, localPath, downloadError) => {
-        set((state) => ({
-          tracks: {
-            ...state.tracks,
-            [trackId]: state.tracks[trackId]
+        set((state) => {
+          const baseTrack = state.tracks[trackId] ?? state.downloadedTracks[trackId];
+
+          if (!baseTrack) {
+            return state;
+          }
+
+          const nextTrack: Track = {
+            ...baseTrack,
+            downloadState,
+            localPath,
+            downloadError,
+            isFavorite: downloadState === "downloaded" ? true : baseTrack.isFavorite,
+          };
+          const nextDownloadedTracks = { ...state.downloadedTracks };
+
+          if (downloadState === "downloaded" && localPath) {
+            nextDownloadedTracks[trackId] = {
+              ...nextTrack,
+              isFavorite: true,
+              downloadState: "downloaded",
+              localPath,
+              downloadError: undefined,
+            };
+          } else {
+            delete nextDownloadedTracks[trackId];
+          }
+
+          return {
+            tracks: {
+              ...state.tracks,
+              [trackId]: nextTrack,
+            },
+            downloadedTracks: nextDownloadedTracks,
+          };
+        });
+      },
+      syncDownloadsFromDisk: (downloads) => {
+        set((state) => {
+          const nextTracks = { ...state.tracks };
+          const nextDownloadedTracks: TrackMap = {};
+          const diskDownloadIds = new Set(downloads.map((download) => download.trackId));
+          const downloadByTrackId = new Map(downloads.map((download) => [download.trackId, download]));
+          const nextFavorites = state.favorites.filter((trackId) => {
+            const knownTrack = state.tracks[trackId] ?? state.downloadedTracks[trackId];
+            return !!knownTrack;
+          });
+          const favoriteTrackIds = new Set(nextFavorites);
+          const trackedDownloadIds = new Set([
+            ...state.favorites,
+            ...Object.keys(state.downloadedTracks),
+          ]);
+
+          for (const [trackId, track] of Object.entries(state.downloadedTracks)) {
+            if (diskDownloadIds.has(trackId)) {
+              nextDownloadedTracks[trackId] = track;
+              continue;
+            }
+
+            if (nextTracks[trackId]) {
+              nextTracks[trackId] = {
+                ...nextTracks[trackId],
+                downloadState: "idle",
+                localPath: undefined,
+                downloadError: undefined,
+              };
+            }
+          }
+
+          for (const trackId of trackedDownloadIds) {
+            const download = downloadByTrackId.get(trackId);
+            const snapshot = state.tracks[trackId] ?? state.downloadedTracks[trackId];
+
+            if (!download || !snapshot) {
+              continue;
+            }
+
+            const restoredTrack: Track = snapshot
               ? {
-                  ...state.tracks[trackId],
-                  downloadState,
-                  localPath,
-                  downloadError,
+                  ...snapshot,
+                  isFavorite: true,
+                  downloadState: "downloaded",
+                  localPath: download.localPath,
+                  downloadError: undefined,
                 }
-              : state.tracks[trackId],
-          },
-        }));
+              : snapshot;
+
+            nextDownloadedTracks[trackId] = restoredTrack;
+            nextTracks[trackId] = restoredTrack;
+
+            if (!favoriteTrackIds.has(trackId)) {
+              nextFavorites.push(trackId);
+              favoriteTrackIds.add(trackId);
+            }
+          }
+
+          return {
+            tracks: nextTracks,
+            downloadedTracks: nextDownloadedTracks,
+            favorites: nextFavorites,
+          };
+        });
       },
       setTrackMetadata: (trackId, patch) => {
         set((state) => ({
@@ -276,6 +499,15 @@ export const useAppStore = create<AppState>()(
                   ...patch,
                 }
               : state.tracks[trackId],
+          },
+          downloadedTracks: {
+            ...state.downloadedTracks,
+            [trackId]: state.downloadedTracks[trackId]
+              ? {
+                  ...state.downloadedTracks[trackId],
+                  ...patch,
+                }
+              : state.downloadedTracks[trackId],
           },
         }));
       },
@@ -430,7 +662,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: "app-state",
-      version: 7,
+      version: 9,
       storage: createJSONStorage(() => localStorage),
       migrate: (persistedState) => {
         const state = persistedState as Partial<AppState> | undefined;
@@ -445,19 +677,29 @@ export const useAppStore = create<AppState>()(
         const originalQueue = Array.isArray(state.originalQueue)
           ? state.originalQueue
           : currentQueue;
+        const downloadedTracks =
+          state.downloadedTracks && typeof state.downloadedTracks === "object"
+            ? (state.downloadedTracks as TrackMap)
+            : {};
         const currentTrackId =
           typeof state.currentTrackId === "string" ? state.currentTrackId : null;
+        const listenHistory = sanitizeAndFilterListenHistory(
+          state.listenHistory as ListenHistoryEntry[] | undefined,
+        );
         const persistedTrackIds = getPersistedTrackIds({
           favorites,
           playlists,
           currentQueue,
           originalQueue,
           currentTrackId,
+          listenHistory,
+          downloadedTracks,
         });
 
         return {
           ...state,
           tracks: pickTracksForPersistence(state.tracks as TrackMap | undefined, persistedTrackIds),
+          downloadedTracks,
           artists: {},
           releases: {},
           lyricsByTrackId: {},
@@ -470,6 +712,7 @@ export const useAppStore = create<AppState>()(
           searchStatus: "idle",
           searchError: null,
           recentSearches: Array.isArray(state.recentSearches) ? state.recentSearches : [],
+          listenHistory,
           favorites,
           playlists,
           currentQueue,
@@ -486,12 +729,18 @@ export const useAppStore = create<AppState>()(
         } as AppState;
       },
       partialize: (state) => {
-        const persistedTrackIds = getPersistedTrackIds(state);
+        const listenHistory = sanitizeAndFilterListenHistory(state.listenHistory);
+        const persistedTrackIds = getPersistedTrackIds({
+          ...state,
+          listenHistory,
+        });
 
         return {
           tracks: pickTracksForPersistence(state.tracks, persistedTrackIds),
+          downloadedTracks: state.downloadedTracks,
           searchQuery: state.searchQuery,
           recentSearches: state.recentSearches,
+          listenHistory,
           favorites: state.favorites,
           playlists: state.playlists,
           currentQueue: state.currentQueue,

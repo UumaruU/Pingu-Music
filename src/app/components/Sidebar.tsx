@@ -1,16 +1,36 @@
-import { Heart, House, ListMusic } from "lucide-react";
-import { RouteId } from "../types";
+import { Heart, History, House, ListMusic, LogIn, LogOut, UserPlus } from "lucide-react";
+import { AuthUser, RouteId } from "../types";
+import { getUserDisplayName } from "../services/userService";
 import { BrandMark } from "./BrandMark";
+
+type PrimaryRoute = "home" | "history" | "favorites" | "playlists";
 
 interface SidebarProps {
   activePage: RouteId;
   onNavigate: (route: RouteId) => void;
+  user: AuthUser | null;
+  isAuthenticated: boolean;
+  isAuthLoading: boolean;
+  onLogout: () => void;
 }
 
-export function Sidebar({ activePage, onNavigate }: SidebarProps) {
-  const navItems: Array<{ id: RouteId; label: string; icon: typeof House; hint: string }> = [
+export function Sidebar({
+  activePage,
+  onNavigate,
+  user,
+  isAuthenticated,
+  isAuthLoading,
+  onLogout,
+}: SidebarProps) {
+  const navItems: Array<{
+    id: PrimaryRoute;
+    label: string;
+    icon: typeof House;
+    hint: string;
+  }> = [
     { id: "home", label: "Главная", icon: House, hint: "Популярное и подборки" },
-    { id: "favorites", label: "Избранное", icon: Heart, hint: "Автозагрузка и сохранённое" },
+    { id: "history", label: "История", icon: History, hint: "Прослушанные треки" },
+    { id: "favorites", label: "Избранное", icon: Heart, hint: "Автозагрузка и сохраненное" },
     { id: "playlists", label: "Плейлисты", icon: ListMusic, hint: "Ваши подборки" },
   ];
 
@@ -35,7 +55,11 @@ export function Sidebar({ activePage, onNavigate }: SidebarProps) {
                     : "text-white/60 hover:bg-white/[0.05] hover:text-white"
                 }`}
               >
-                <span className={`flex h-11 w-11 items-center justify-center rounded-2xl ${isActive ? "bg-cyan-300/14 text-cyan-100" : "bg-white/[0.04]"}`}>
+                <span
+                  className={`flex h-11 w-11 items-center justify-center rounded-2xl ${
+                    isActive ? "bg-cyan-300/14 text-cyan-100" : "bg-white/[0.04]"
+                  }`}
+                >
                   <Icon size={19} />
                 </span>
                 <span className="min-w-0">
@@ -47,6 +71,49 @@ export function Sidebar({ activePage, onNavigate }: SidebarProps) {
           })}
         </nav>
       </div>
+
+      <div className="mt-auto rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
+        <div className="mb-3 text-xs uppercase tracking-[0.22em] text-white/45">Профиль</div>
+        {isAuthenticated && user ? (
+          <>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3">
+              <div className="text-sm font-medium text-white">{getUserDisplayName(user)}</div>
+              <div className="mt-1 text-xs text-white/50">{user.email}</div>
+            </div>
+            <button
+              type="button"
+              onClick={onLogout}
+              disabled={isAuthLoading}
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/80 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <LogOut size={15} />
+              Выйти
+            </button>
+          </>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={() => onNavigate("login")}
+              disabled={isAuthLoading}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-300/35 bg-cyan-300/14 px-3 py-2 text-sm text-cyan-100 transition hover:bg-cyan-300/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <LogIn size={15} />
+              Вход
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigate("register")}
+              disabled={isAuthLoading}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/80 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <UserPlus size={15} />
+              Регистрация
+            </button>
+          </div>
+        )}
+      </div>
     </aside>
   );
 }
+

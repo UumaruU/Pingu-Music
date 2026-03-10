@@ -18,7 +18,7 @@ class DownloadService {
 
   async startDownload(trackId: string) {
     const store = useAppStore.getState();
-    const track = store.tracks[trackId];
+    const track = store.tracks[trackId] ?? store.downloadedTracks[trackId];
 
     if (!track) {
       return null;
@@ -70,6 +70,20 @@ class DownloadService {
     return downloadPromise;
   }
 
+  async restoreDownloadsFromDisk() {
+    if (!tauriBridge.isTauriRuntime()) {
+      return;
+    }
+
+    try {
+      const downloads = await tauriBridge.listLocalDownloads();
+      useAppStore.getState().syncDownloadsFromDisk(downloads);
+      console.info("[download] Restored local downloads", { count: downloads.length });
+    } catch (error) {
+      console.error("[download] Failed to restore local downloads", { error });
+    }
+  }
+
   async removeDownload(trackId: string) {
     const activeDownload = this.activeDownloads.get(trackId);
 
@@ -77,7 +91,8 @@ class DownloadService {
       await activeDownload.catch(() => null);
     }
 
-    const track = useAppStore.getState().tracks[trackId];
+    const state = useAppStore.getState();
+    const track = state.tracks[trackId] ?? state.downloadedTracks[trackId];
 
     if (track?.localPath) {
       try {
@@ -91,11 +106,13 @@ class DownloadService {
   }
 
   checkIfDownloaded(trackId: string) {
-    return useAppStore.getState().tracks[trackId]?.downloadState === "downloaded";
+    const state = useAppStore.getState();
+    return (state.tracks[trackId] ?? state.downloadedTracks[trackId])?.downloadState === "downloaded";
   }
 
   getLocalTrackPath(trackId: string) {
-    return useAppStore.getState().tracks[trackId]?.localPath;
+    const state = useAppStore.getState();
+    return (state.tracks[trackId] ?? state.downloadedTracks[trackId])?.localPath;
   }
 }
 

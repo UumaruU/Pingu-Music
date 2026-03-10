@@ -41,21 +41,26 @@ export class LrclibProvider implements LyricsProvider {
     const normalizedTitle = normalizeCompare(params.title);
     const normalizedArtist = normalizeCompare(params.artist);
 
+    const exactCandidates = candidates.filter((candidate) => {
+      const titleMatches = normalizeCompare(candidate.trackName) === normalizedTitle;
+      const artistMatches = normalizeCompare(candidate.artistName).includes(normalizedArtist);
+
+      if (!titleMatches || !artistMatches) {
+        return false;
+      }
+
+      if (!params.duration) {
+        return true;
+      }
+
+      return Math.abs(candidate.duration - params.duration) <= 4;
+    });
+
     const bestMatch =
-      candidates.find((candidate) => {
-        const titleMatches = normalizeCompare(candidate.trackName) === normalizedTitle;
-        const artistMatches = normalizeCompare(candidate.artistName).includes(normalizedArtist);
-
-        if (!titleMatches || !artistMatches) {
-          return false;
-        }
-
-        if (!params.duration) {
-          return true;
-        }
-
-        return Math.abs(candidate.duration - params.duration) <= 4;
-      }) ?? candidates[0];
+      exactCandidates.find((candidate) => !!candidate.syncedLyrics) ??
+      exactCandidates[0] ??
+      candidates.find((candidate) => !!candidate.syncedLyrics) ??
+      candidates[0];
 
     if (!bestMatch || (!bestMatch.plainLyrics && !bestMatch.syncedLyrics)) {
       return null;

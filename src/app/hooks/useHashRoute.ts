@@ -28,7 +28,15 @@ function parseRoute(hash: string): RouteState {
     return { page: "release", releaseId: segments[1] };
   }
 
-  if (segments[0] === "favorites" || segments[0] === "playlists" || segments[0] === "search" || segments[0] === "home") {
+  if (
+    segments[0] === "favorites" ||
+    segments[0] === "playlists" ||
+    segments[0] === "search" ||
+    segments[0] === "history" ||
+    segments[0] === "login" ||
+    segments[0] === "register" ||
+    segments[0] === "home"
+  ) {
     return { page: segments[0] };
   }
 

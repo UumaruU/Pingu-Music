@@ -27,7 +27,8 @@ export function HomePage(props: HomePageProps) {
             Музыка без лишнего шума: популярное, избранное и ваши плейлисты в одном окне.
           </h1>
           <p className="mt-4 max-w-xl text-sm leading-7 text-white/60">
-            Pingu Music помогает быстро находить треки, открывать исполнителей, тексты и собирать плейлисты в одном приложении.
+            Pingu Music помогает быстро находить треки, открывать исполнителей, тексты и собирать
+            плейлисты в одном приложении.
           </p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
@@ -36,12 +37,17 @@ export function HomePage(props: HomePageProps) {
               <Flame size={20} />
             </div>
             <div className="text-lg font-semibold text-white">Популярное сейчас</div>
-            <div className="mt-2 text-sm text-white/55">Пустой поиск автоматически показывает горячие треки из текущего каталога.</div>
+            <div className="mt-2 text-sm text-white/55">
+              Пустой поиск автоматически показывает горячие треки из текущего каталога.
+            </div>
           </div>
           <div className="rounded-[26px] border border-white/10 bg-white/[0.04] p-5">
             <div className="text-sm uppercase tracking-[0.25em] text-white/35">Метаданные</div>
             <div className="mt-3 text-lg font-semibold text-white">Артисты и тексты</div>
-            <div className="mt-2 text-sm text-white/55">Карточки артистов, альбомы и тексты песен подтягиваются локально и кешируются во времени.</div>
+            <div className="mt-2 text-sm text-white/55">
+              Карточки артистов, альбомы и тексты песен подтягиваются локально и кэшируются во
+              времени.
+            </div>
           </div>
         </div>
       </section>
@@ -56,7 +62,10 @@ export function HomePage(props: HomePageProps) {
         {props.tracks.length ? (
           <TrackList {...props} />
         ) : (
-          <EmptyState title="Здесь пока ничего нет" description="Каталог пуст. Обновите страницу или попробуйте позже." />
+          <EmptyState
+            title="Здесь пока ничего нет"
+            description="Каталог пуст. Обновите страницу или попробуйте позже."
+          />
         )}
       </section>
     </div>

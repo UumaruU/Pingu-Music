@@ -1,6 +1,6 @@
 [package]
 name = "pingu-music"
-version = "0.1.0"
+version = "0.1.2"
 description = "Pingu Music desktop shell"
 edition = "2021"
 
@@ -18,6 +18,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = [] }
 tauri-plugin-store = "2"
+keyring = "2.3"
 urlencoding = "2.1"
 
 [[bin]]

@@ -9,6 +9,9 @@ class PlayerService {
 
   private initialized = false;
   private runtimeBlobUrl: string | null = null;
+  private historyTrackId: string | null = null;
+  private historySavedForCurrentTrack = false;
+  private pendingSeekSeconds: number | null = null;
 
   initialize() {
     if (this.initialized) {
@@ -22,13 +25,20 @@ class PlayerService {
 
     this.audio.addEventListener("timeupdate", () => {
       useAppStore.getState().setProgress(this.audio.currentTime);
+      this.trySaveListenHistory();
     });
 
     this.audio.addEventListener("loadedmetadata", () => {
+      if (this.pendingSeekSeconds !== null) {
+        this.audio.currentTime = clamp(this.pendingSeekSeconds, 0, this.audio.duration || this.pendingSeekSeconds);
+        this.pendingSeekSeconds = null;
+      }
+
       useAppStore.getState().setDuration(Number.isFinite(this.audio.duration) ? this.audio.duration : 0);
     });
 
     this.audio.addEventListener("ended", () => {
+      this.trySaveListenHistory(true);
       this.handleEnded();
     });
 
@@ -44,6 +54,44 @@ class PlayerService {
   private getCurrentTrack() {
     const state = this.getState();
     return state.currentTrackId ? state.tracks[state.currentTrackId] : null;
+  }
+
+  private syncHistoryTrackingTrack(trackId: string) {
+    if (this.historyTrackId === trackId) {
+      return;
+    }
+
+    this.historyTrackId = trackId;
+    this.historySavedForCurrentTrack = false;
+  }
+
+  private trySaveListenHistory(force = false) {
+    const currentTrack = this.getCurrentTrack();
+
+    if (!currentTrack) {
+      return;
+    }
+
+    this.syncHistoryTrackingTrack(currentTrack.id);
+
+    if (this.historySavedForCurrentTrack) {
+      return;
+    }
+
+    const duration = Number.isFinite(this.audio.duration) && this.audio.duration > 0
+      ? this.audio.duration
+      : currentTrack.duration;
+
+    if (!Number.isFinite(duration) || duration <= 0) {
+      return;
+    }
+
+    const progressRatio = duration > 0 ? this.audio.currentTime / duration : 0;
+
+    if (force || progressRatio >= 0.5) {
+      this.getState().addListenHistory(currentTrack.id);
+      this.historySavedForCurrentTrack = true;
+    }
   }
 
   private isAbsolutePath(path: string) {
@@ -191,6 +239,7 @@ class PlayerService {
   }
 
   private async syncAndPlay(trackId: string, restart = true) {
+    this.syncHistoryTrackingTrack(trackId);
     const track = this.getState().tracks[trackId];
     const prefersLocal =
       !!track &&
@@ -304,6 +353,19 @@ class PlayerService {
   seek(progress: number) {
     this.audio.currentTime = clamp(progress, 0, this.audio.duration || progress);
     this.getState().setProgress(this.audio.currentTime);
+  }
+
+  seekToTrackPosition(trackId: string, progress: number, queueIds?: string[]) {
+    const safeProgress = Math.max(0, progress);
+    const state = this.getState();
+
+    if (state.currentTrackId === trackId) {
+      this.seek(safeProgress);
+      return;
+    }
+
+    this.pendingSeekSeconds = safeProgress;
+    this.playTrack(trackId, queueIds ?? [trackId]);
   }
 
   setVolume(volume: number) {

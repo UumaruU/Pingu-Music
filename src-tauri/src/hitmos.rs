@@ -35,6 +35,13 @@ pub struct TrackBlobResult {
     pub base64_data: String,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalDownloadEntry {
+    pub track_id: String,
+    pub local_path: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct HitmosMeta {
     artist: String,
@@ -307,4 +314,50 @@ pub fn delete_local_track(local_path: String) -> Result<(), String> {
 
     fs::remove_file(path).map_err(|error| format!("Failed to delete local track file: {error}"))?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn list_local_downloads(app: tauri::AppHandle) -> Result<Vec<LocalDownloadEntry>, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Failed to resolve app data directory: {error}"))?;
+    let downloads_dir = app_data_dir.join("downloads");
+
+    if !downloads_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut downloads = Vec::new();
+
+    for entry in fs::read_dir(&downloads_dir)
+        .map_err(|error| format!("Failed to read downloads directory: {error}"))?
+    {
+        let entry = entry.map_err(|error| format!("Failed to read download entry: {error}"))?;
+        let path = entry.path();
+
+        if !path.is_file() {
+            continue;
+        }
+
+        let Some(extension) = path.extension().and_then(|extension| extension.to_str()) else {
+            continue;
+        };
+
+        if !extension.eq_ignore_ascii_case("mp3") {
+            continue;
+        }
+
+        let Some(track_id) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+
+        downloads.push(LocalDownloadEntry {
+            track_id: track_id.to_string(),
+            local_path: path.to_string_lossy().to_string(),
+        });
+    }
+
+    downloads.sort_by(|left, right| left.track_id.cmp(&right.track_id));
+    Ok(downloads)
 }

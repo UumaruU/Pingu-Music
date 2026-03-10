@@ -1,13 +1,14 @@
 {
   "name": "pingu-music",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.1.2",
   "type": "module",
   "scripts": {
-    "build": "vite build",
-    "dev": "vite",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "sync:version": "node scripts/sync-version.mjs",
+    "build": "node scripts/sync-version.mjs && vite build",
+    "dev": "node scripts/sync-version.mjs && vite",
+    "tauri:dev": "node scripts/sync-version.mjs && tauri dev",
+    "tauri:build": "node scripts/sync-version.mjs && tauri build"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
