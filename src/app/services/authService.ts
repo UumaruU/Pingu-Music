@@ -3,7 +3,7 @@ import { apiClient } from "./apiClient";
 import { normalizeAuthUser } from "./userService";
 
 interface AuthCredentials {
-  email: string;
+  login: string;
   password: string;
 }
 
@@ -114,7 +114,7 @@ export const authService = {
     }
 
     return this.login({
-      email: payload.email,
+      login: payload.login,
       password: payload.password,
     });
   },
@@ -171,4 +171,3 @@ export const authService = {
     return user;
   },
 };
-

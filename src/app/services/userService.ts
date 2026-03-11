@@ -44,16 +44,16 @@ export function normalizeAuthUser(payload: unknown): AuthUser | null {
 
   const userRecord = asRecord(root.user) ?? root;
   const id = readString(userRecord, ["id", "_id", "userId", "sub"]);
-  const email = readString(userRecord, ["email", "mail", "login"]);
+  const login = readString(userRecord, ["login", "username", "email", "mail"]);
 
-  if (!id || !email) {
+  if (!id || !login) {
     return null;
   }
 
   return {
     id,
-    email,
-    name: readString(userRecord, ["name", "displayName", "username"]),
+    login,
+    name: readString(userRecord, ["name", "displayName"]),
     avatarUrl: readString(userRecord, ["avatarUrl", "avatar", "image"]),
   };
 }
@@ -67,6 +67,5 @@ export function getUserDisplayName(user: AuthUser | null) {
     return user.name.trim();
   }
 
-  return user.email;
+  return user.login;
 }
-

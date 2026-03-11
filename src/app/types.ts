@@ -122,7 +122,7 @@ export interface RouteState {
 
 export interface AuthUser {
   id: string;
-  email: string;
+  login: string;
   name?: string;
   avatarUrl?: string;
 }

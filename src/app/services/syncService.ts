@@ -1,11 +1,17 @@
 import { ApiClientError, ApiRequestOptions, apiClient } from "./apiClient";
+import { downloadService } from "./downloadService";
 import { useAppStore } from "../store/appStore";
-import { ListenHistoryEntry, PlayerSettings, Playlist, RepeatMode, SyncStatus } from "../types";
+import { ListenHistoryEntry, PlayerSettings, Playlist, RepeatMode, SyncStatus, Track } from "../types";
 
 interface SyncResult {
   status: SyncStatus;
   merged: boolean;
   conflictNames: string[];
+}
+
+interface FavoritesSyncState {
+  favoriteIds: string[];
+  tracks: Track[];
 }
 
 const FAVORITES_PULL_ENDPOINTS = ["/sync/favorites"];
@@ -115,6 +121,69 @@ function normalizeFavorites(payload: unknown) {
     .filter(Boolean);
 
   return [...new Set(result)];
+}
+
+function normalizeFavoriteTracks(payload: unknown): Track[] {
+  const record = asRecord(payload);
+  const rawTracks = Array.isArray(record?.tracks) ? record.tracks : [];
+
+  const normalizedTracks: Array<Track | null> = rawTracks.map((item) => {
+      const track = asRecord(item);
+      if (!track) {
+        return null;
+      }
+
+      const id = typeof track.id === "string" && track.id.trim() ? track.id.trim() : "";
+      const title = typeof track.title === "string" && track.title.trim() ? track.title.trim() : "";
+      const artist =
+        typeof track.artist === "string" && track.artist.trim() ? track.artist.trim() : "";
+      const audioUrl =
+        typeof track.audioUrl === "string" && track.audioUrl.trim() ? track.audioUrl.trim() : "";
+
+      if (!id || !title || !artist || !audioUrl) {
+        return null;
+      }
+
+      return {
+        id,
+        title,
+        artist,
+        coverUrl:
+          typeof track.coverUrl === "string" && track.coverUrl.trim()
+            ? track.coverUrl.trim()
+            : "https://placehold.co/300x300?text=Pingu+Music",
+        audioUrl,
+        duration:
+          typeof track.duration === "number" && Number.isFinite(track.duration)
+            ? track.duration
+            : 0,
+        sourceUrl:
+          typeof track.sourceUrl === "string" && track.sourceUrl.trim()
+            ? track.sourceUrl.trim()
+            : "https://rus.hitmotop.com",
+        isFavorite: true,
+        downloadState: "idle",
+        metadataStatus: "raw",
+        albumTitle:
+          typeof track.albumTitle === "string" && track.albumTitle.trim()
+            ? track.albumTitle.trim()
+            : undefined,
+        musicBrainzRecordingId:
+          typeof track.musicBrainzRecordingId === "string" && track.musicBrainzRecordingId.trim()
+            ? track.musicBrainzRecordingId.trim()
+            : undefined,
+        musicBrainzArtistId:
+          typeof track.musicBrainzArtistId === "string" && track.musicBrainzArtistId.trim()
+            ? track.musicBrainzArtistId.trim()
+            : undefined,
+        musicBrainzReleaseId:
+          typeof track.musicBrainzReleaseId === "string" && track.musicBrainzReleaseId.trim()
+            ? track.musicBrainzReleaseId.trim()
+            : undefined,
+      } satisfies Track;
+    });
+
+  return normalizedTracks.filter((track): track is Track => !!track);
 }
 
 function normalizePlaylists(payload: unknown) {
@@ -442,12 +511,13 @@ export const syncService = {
   },
 
   async syncAfterLogin() {
-    const [remoteFavorites, remotePlaylists, remoteSettings, remoteHistory] = await Promise.all([
+    const [remoteFavoritesState, remotePlaylists, remoteSettings, remoteHistory] = await Promise.all([
       this.pullFavorites(),
       this.pullPlaylists(),
       this.pullSettings(),
       this.pullHistory(),
     ]);
+    const remoteFavorites = remoteFavoritesState.favoriteIds;
 
     const nextSettings: PlayerSettings = {
       ...DEFAULT_PLAYER_SETTINGS,
@@ -461,8 +531,12 @@ export const syncService = {
         playerSettings: nextSettings,
         listenHistory: remoteHistory,
       });
+      if (remoteFavoritesState.tracks.length) {
+        useAppStore.getState().hydrateCatalog(remoteFavoritesState.tracks);
+      }
       updateTrackFavorites(remoteFavorites);
     });
+    await downloadService.restoreMissingFavoriteDownloads(remoteFavorites);
     this.enableRealtimeSync();
 
     return {
@@ -477,7 +551,10 @@ export const syncService = {
       auth: true,
     });
 
-    return normalizeFavorites(payload);
+    return {
+      favoriteIds: normalizeFavorites(payload),
+      tracks: normalizeFavoriteTracks(payload),
+    } satisfies FavoritesSyncState;
   },
 
   async pushFavorites(favorites: string[]) {

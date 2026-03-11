@@ -11,6 +11,7 @@ interface SidebarProps {
   user: AuthUser | null;
   isAuthenticated: boolean;
   isAuthLoading: boolean;
+  hasRestoredSession: boolean;
   onLogout: () => void;
 }
 
@@ -20,6 +21,7 @@ export function Sidebar({
   user,
   isAuthenticated,
   isAuthLoading,
+  hasRestoredSession,
   onLogout,
 }: SidebarProps) {
   const navItems: Array<{
@@ -74,11 +76,15 @@ export function Sidebar({
 
       <div className="mt-auto rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
         <div className="mb-3 text-xs uppercase tracking-[0.22em] text-white/45">Профиль</div>
-        {isAuthenticated && user ? (
+        {!hasRestoredSession ? (
+          <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3 text-sm text-white/45">
+            Восстанавливаем сессию...
+          </div>
+        ) : isAuthenticated && user ? (
           <>
             <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3">
               <div className="text-sm font-medium text-white">{getUserDisplayName(user)}</div>
-              <div className="mt-1 text-xs text-white/50">{user.email}</div>
+              <div className="mt-1 text-xs text-white/50">@{user.login}</div>
             </div>
             <button
               type="button"
@@ -116,4 +122,3 @@ export function Sidebar({
     </aside>
   );
 }
-

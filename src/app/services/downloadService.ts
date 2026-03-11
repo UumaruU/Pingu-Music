@@ -84,6 +84,36 @@ class DownloadService {
     }
   }
 
+  async restoreMissingFavoriteDownloads(trackIds: string[]) {
+    const favoriteTrackIds = [...new Set(trackIds.filter((trackId) => typeof trackId === "string" && trackId.trim()))];
+
+    if (!favoriteTrackIds.length) {
+      return;
+    }
+
+    const missingTrackIds = favoriteTrackIds.filter((trackId) => {
+      const track = useAppStore.getState().tracks[trackId] ?? useAppStore.getState().downloadedTracks[trackId];
+
+      if (!track || !track.audioUrl.trim()) {
+        return false;
+      }
+
+      return !(
+        track.downloadState === "downloaded" &&
+        !!track.localPath &&
+        this.isAbsolutePath(track.localPath)
+      );
+    });
+
+    if (!missingTrackIds.length) {
+      return;
+    }
+
+    await Promise.allSettled(
+      missingTrackIds.map((trackId) => this.startDownload(trackId)),
+    );
+  }
+
   async removeDownload(trackId: string) {
     const activeDownload = this.activeDownloads.get(trackId);
 

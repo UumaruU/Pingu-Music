@@ -4,7 +4,7 @@ interface RegisterPageProps {
   isLoading: boolean;
   error: string | null;
   onRegister: (payload: {
-    email: string;
+    login: string;
     password: string;
     name?: string;
   }) => Promise<void>;
@@ -18,29 +18,29 @@ export function RegisterPage({
   onOpenLogin,
 }: RegisterPageProps) {
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    const normalizedEmail = email.trim();
+    const normalizedLogin = login.trim();
 
-    if (!normalizedEmail || !password.trim()) {
-      setFormError("Введите email и пароль.");
+    if (!normalizedLogin || !password.trim()) {
+      setFormError("Введите логин и пароль.");
       return;
     }
 
-    if (password.trim().length < 6) {
-      setFormError("Пароль должен быть не короче 6 символов.");
+    if (password.trim().length < 8) {
+      setFormError("Пароль должен быть не короче 8 символов.");
       return;
     }
 
     setFormError(null);
     try {
       await onRegister({
-        email: normalizedEmail,
+        login: normalizedLogin,
         password,
         name: name.trim() || undefined,
       });
@@ -72,14 +72,14 @@ export function RegisterPage({
         </label>
 
         <label className="block">
-          <span className="mb-2 block text-xs uppercase tracking-[0.22em] text-white/45">Email</span>
+          <span className="mb-2 block text-xs uppercase tracking-[0.22em] text-white/45">Логин</span>
           <input
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            autoComplete="email"
+            type="text"
+            value={login}
+            onChange={(event) => setLogin(event.target.value)}
+            autoComplete="username"
             className="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-white outline-none transition focus:border-cyan-300/35"
-            placeholder="you@example.com"
+            placeholder="pingu_user"
           />
         </label>
 
@@ -91,7 +91,7 @@ export function RegisterPage({
             onChange={(event) => setPassword(event.target.value)}
             autoComplete="new-password"
             className="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-white outline-none transition focus:border-cyan-300/35"
-            placeholder="Минимум 6 символов"
+            placeholder="Минимум 8 символов"
           />
         </label>
 

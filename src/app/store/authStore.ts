@@ -6,7 +6,7 @@ import { sessionService } from "../services/sessionService";
 import { syncService } from "../services/syncService";
 
 interface LoginPayload {
-  email: string;
+  login: string;
   password: string;
 }
 
@@ -74,7 +74,8 @@ export const useAuthStore = create<AuthStoreState>()((set, get) => ({
 
     try {
       const session = await authService.login(payload);
-      sessionService.setAccessToken(session.tokens.accessToken);
+      await sessionService.setAccessToken(session.tokens.accessToken);
+      await sessionService.setCachedUser(session.user);
 
       if (session.tokens.refreshToken) {
         await sessionService.setRefreshToken(session.tokens.refreshToken);
@@ -97,6 +98,7 @@ export const useAuthStore = create<AuthStoreState>()((set, get) => ({
     } catch (error) {
       const authError = toAuthError(error);
       sessionService.clearAccessToken();
+      sessionService.clearCachedUser();
       await sessionService.clearRefreshToken();
       set({
         ...buildGuestState(authError),
@@ -117,7 +119,8 @@ export const useAuthStore = create<AuthStoreState>()((set, get) => ({
 
     try {
       const session = await authService.register(payload);
-      sessionService.setAccessToken(session.tokens.accessToken);
+      await sessionService.setAccessToken(session.tokens.accessToken);
+      await sessionService.setCachedUser(session.user);
 
       if (session.tokens.refreshToken) {
         await sessionService.setRefreshToken(session.tokens.refreshToken);
@@ -140,6 +143,7 @@ export const useAuthStore = create<AuthStoreState>()((set, get) => ({
     } catch (error) {
       const authError = toAuthError(error);
       sessionService.clearAccessToken();
+      sessionService.clearCachedUser();
       await sessionService.clearRefreshToken();
       set({
         ...buildGuestState(authError),
@@ -160,6 +164,7 @@ export const useAuthStore = create<AuthStoreState>()((set, get) => ({
     }
 
     sessionService.clearAccessToken();
+    sessionService.clearCachedUser();
     await sessionService.clearRefreshToken();
     set({
       ...buildGuestState(),
@@ -182,9 +187,38 @@ export const useAuthStore = create<AuthStoreState>()((set, get) => ({
     });
 
     try {
-      const refreshToken = await sessionService.getRefreshToken();
+      const [storedAccessToken, storedUser, refreshToken] = await Promise.all([
+        sessionService.loadAccessToken(),
+        sessionService.loadCachedUser(),
+        sessionService.getRefreshToken(),
+      ]);
+
+      if (storedAccessToken && sessionService.isAccessTokenFresh(storedAccessToken)) {
+        const profile = storedUser ?? (await authService.me());
+
+        await sessionService.setCachedUser(profile);
+        set({
+          ...buildAuthenticatedState(profile, storedAccessToken),
+          hasRestoredSession: true,
+          isRestoring: false,
+          syncStatus: "syncing",
+        });
+
+        const syncResult = await syncService.syncAfterLogin().catch(() => ({
+          status: "error" as SyncStatus,
+          merged: false,
+          conflictNames: [],
+        }));
+
+        set({
+          syncStatus: syncResult.status,
+        });
+        return;
+      }
 
       if (!refreshToken) {
+        sessionService.clearAccessToken();
+        sessionService.clearCachedUser();
         set({
           ...buildGuestState(),
           hasRestoredSession: true,
@@ -194,13 +228,14 @@ export const useAuthStore = create<AuthStoreState>()((set, get) => ({
       }
 
       const refreshedTokens = await authService.refresh(refreshToken);
-      sessionService.setAccessToken(refreshedTokens.accessToken);
+      await sessionService.setAccessToken(refreshedTokens.accessToken);
 
       if (refreshedTokens.refreshToken) {
         await sessionService.setRefreshToken(refreshedTokens.refreshToken);
       }
 
       const profile = await authService.me();
+      await sessionService.setCachedUser(profile);
 
       set({
         ...buildAuthenticatedState(profile, refreshedTokens.accessToken),
@@ -220,6 +255,7 @@ export const useAuthStore = create<AuthStoreState>()((set, get) => ({
       });
     } catch {
       sessionService.clearAccessToken();
+      sessionService.clearCachedUser();
       await sessionService.clearRefreshToken();
       set({
         ...buildGuestState(),
@@ -235,6 +271,7 @@ export const useAuthStore = create<AuthStoreState>()((set, get) => ({
     if (!refreshToken) {
       syncService.disableRealtimeSync();
       sessionService.clearAccessToken();
+      sessionService.clearCachedUser();
       set({
         ...buildGuestState(),
       });
@@ -243,7 +280,7 @@ export const useAuthStore = create<AuthStoreState>()((set, get) => ({
 
     try {
       const refreshedTokens = await authService.refresh(refreshToken);
-      sessionService.setAccessToken(refreshedTokens.accessToken);
+      await sessionService.setAccessToken(refreshedTokens.accessToken);
 
       if (refreshedTokens.refreshToken) {
         await sessionService.setRefreshToken(refreshedTokens.refreshToken);
@@ -275,6 +312,7 @@ export const useAuthStore = create<AuthStoreState>()((set, get) => ({
   clearAuthState() {
     syncService.disableRealtimeSync();
     sessionService.clearAccessToken();
+    sessionService.clearCachedUser();
     void sessionService.clearRefreshToken();
     set({
       ...buildGuestState(),

@@ -877,6 +877,7 @@ export default function App() {
           user={authState.user}
           isAuthenticated={authState.isAuthenticated}
           isAuthLoading={authState.isLoading}
+          hasRestoredSession={authState.hasRestoredSession}
           onLogout={() => {
             void logout();
           }}
