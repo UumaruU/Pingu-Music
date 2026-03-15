@@ -14,6 +14,7 @@ import {
   SearchStatus,
   Track,
 } from "../types";
+import { withTrackProviderDefaults } from "../core/tracks/trackIdentity";
 
 type TrackMap = Record<string, Track>;
 type ArtistMap = Record<string, Artist>;
@@ -205,7 +206,9 @@ function pickTracksForPersistence(tracks: TrackMap | undefined, trackIds: Set<st
   }
 
   return Object.fromEntries(
-    Object.entries(tracks).filter(([trackId]) => trackIds.has(trackId)),
+    Object.entries(tracks)
+      .filter(([trackId]) => trackIds.has(trackId))
+      .map(([trackId, track]) => [trackId, withTrackProviderDefaults(track)]),
   );
 }
 
@@ -214,36 +217,48 @@ function mergeTrack(
   nextTrack: Track,
   favoriteTrackIds?: Set<string>,
 ): Track {
+  const normalizedNextTrack = withTrackProviderDefaults(nextTrack);
+  const normalizedExistingTrack = existingTrack
+    ? withTrackProviderDefaults(existingTrack)
+    : undefined;
   const isFavorite = favoriteTrackIds
-    ? favoriteTrackIds.has(nextTrack.id)
-    : existingTrack?.isFavorite ?? nextTrack.isFavorite;
+    ? favoriteTrackIds.has(normalizedNextTrack.id)
+    : normalizedExistingTrack?.isFavorite ?? normalizedNextTrack.isFavorite;
   const metadataTrack =
-    existingTrack && existingTrack.metadataStatus !== "raw" ? existingTrack : nextTrack;
+    normalizedExistingTrack && normalizedExistingTrack.metadataStatus !== "raw"
+      ? normalizedExistingTrack
+      : normalizedNextTrack;
 
   return {
-    ...nextTrack,
-    coverUrl: metadataTrack.coverUrl || nextTrack.coverUrl,
+    ...normalizedNextTrack,
+    coverUrl: metadataTrack.coverUrl || normalizedNextTrack.coverUrl,
     isFavorite,
     downloadState: isFavorite
-      ? existingTrack?.downloadState ?? nextTrack.downloadState
+      ? normalizedExistingTrack?.downloadState ?? normalizedNextTrack.downloadState
       : "idle",
-    localPath: isFavorite ? existingTrack?.localPath ?? nextTrack.localPath : undefined,
+    localPath: isFavorite
+      ? normalizedExistingTrack?.localPath ?? normalizedNextTrack.localPath
+      : undefined,
     downloadError: isFavorite
-      ? existingTrack?.downloadError ?? nextTrack.downloadError
+      ? normalizedExistingTrack?.downloadError ?? normalizedNextTrack.downloadError
       : undefined,
     musicBrainzRecordingId:
-      existingTrack?.musicBrainzRecordingId ?? nextTrack.musicBrainzRecordingId,
-    musicBrainzArtistId: existingTrack?.musicBrainzArtistId ?? nextTrack.musicBrainzArtistId,
+      normalizedExistingTrack?.musicBrainzRecordingId ??
+      normalizedNextTrack.musicBrainzRecordingId,
+    musicBrainzArtistId:
+      normalizedExistingTrack?.musicBrainzArtistId ?? normalizedNextTrack.musicBrainzArtistId,
     musicBrainzReleaseId:
-      existingTrack?.musicBrainzReleaseId ?? nextTrack.musicBrainzReleaseId,
+      normalizedExistingTrack?.musicBrainzReleaseId ?? normalizedNextTrack.musicBrainzReleaseId,
     musicBrainzReleaseGroupId:
-      existingTrack?.musicBrainzReleaseGroupId ?? nextTrack.musicBrainzReleaseGroupId,
-    normalizedTitle: existingTrack?.normalizedTitle ?? nextTrack.normalizedTitle,
+      normalizedExistingTrack?.musicBrainzReleaseGroupId ??
+      normalizedNextTrack.musicBrainzReleaseGroupId,
+    normalizedTitle: normalizedExistingTrack?.normalizedTitle ?? normalizedNextTrack.normalizedTitle,
     normalizedArtistName:
-      existingTrack?.normalizedArtistName ?? nextTrack.normalizedArtistName,
-    metadataStatus: existingTrack?.metadataStatus ?? nextTrack.metadataStatus,
-    albumTitle: existingTrack?.albumTitle ?? nextTrack.albumTitle,
-    releaseDate: existingTrack?.releaseDate ?? nextTrack.releaseDate,
+      normalizedExistingTrack?.normalizedArtistName ??
+      normalizedNextTrack.normalizedArtistName,
+    metadataStatus: normalizedExistingTrack?.metadataStatus ?? normalizedNextTrack.metadataStatus,
+    albumTitle: normalizedExistingTrack?.albumTitle ?? normalizedNextTrack.albumTitle,
+    releaseDate: normalizedExistingTrack?.releaseDate ?? normalizedNextTrack.releaseDate,
   };
 }
 
@@ -478,7 +493,7 @@ export const useAppStore = create<AppState>()(
 
             const restoredTrack: Track = snapshot
               ? {
-                  ...snapshot,
+                  ...withTrackProviderDefaults(snapshot),
                   isFavorite: true,
                   downloadState: "downloaded",
                   localPath: download.localPath,
@@ -675,7 +690,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: "app-state",
-      version: 9,
+      version: 10,
       storage: createJSONStorage(() => localStorage),
       migrate: (persistedState) => {
         const state = persistedState as Partial<AppState> | undefined;
@@ -692,7 +707,12 @@ export const useAppStore = create<AppState>()(
           : currentQueue;
         const downloadedTracks =
           state.downloadedTracks && typeof state.downloadedTracks === "object"
-            ? (state.downloadedTracks as TrackMap)
+            ? Object.fromEntries(
+                Object.entries(state.downloadedTracks as TrackMap).map(([trackId, track]) => [
+                  trackId,
+                  withTrackProviderDefaults(track),
+                ]),
+              )
             : {};
         const currentTrackId =
           typeof state.currentTrackId === "string" ? state.currentTrackId : null;
@@ -711,7 +731,10 @@ export const useAppStore = create<AppState>()(
 
         return {
           ...state,
-          tracks: pickTracksForPersistence(state.tracks as TrackMap | undefined, persistedTrackIds),
+          tracks: pickTracksForPersistence(
+            state.tracks as TrackMap | undefined,
+            persistedTrackIds,
+          ),
           downloadedTracks,
           artists: {},
           releases: {},

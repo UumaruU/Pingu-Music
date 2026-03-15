@@ -1,5 +1,6 @@
 import { ApiClientError, ApiRequestOptions, apiClient } from "./apiClient";
 import { downloadService } from "./downloadService";
+import { withTrackProviderDefaults } from "../core/tracks/trackIdentity";
 import { useAppStore } from "../store/appStore";
 import { ListenHistoryEntry, PlayerSettings, Playlist, RepeatMode, SyncStatus, Track } from "../types";
 
@@ -146,6 +147,8 @@ function normalizeFavoriteTracks(payload: unknown): Track[] {
 
       return {
         id,
+        providerId: "hitmos",
+        providerTrackId: id,
         title,
         artist,
         coverUrl:
@@ -183,7 +186,9 @@ function normalizeFavoriteTracks(payload: unknown): Track[] {
       } satisfies Track;
     });
 
-  return normalizedTracks.filter((track): track is Track => !!track);
+  return normalizedTracks
+    .filter((track): track is Track => !!track)
+    .map((track) => withTrackProviderDefaults(track));
 }
 
 function normalizePlaylists(payload: unknown) {

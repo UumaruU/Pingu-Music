@@ -2,6 +2,8 @@
 
 mod hitmos;
 mod secure_storage;
+mod soundcloud;
+mod artwork;
 
 fn main() {
     tauri::Builder::default()
@@ -14,6 +16,10 @@ fn main() {
             hitmos::get_local_track_blob,
             hitmos::delete_local_track,
             hitmos::list_local_downloads,
+            soundcloud::search_soundcloud,
+            soundcloud::resolve_soundcloud_stream,
+            soundcloud::save_soundcloud_track,
+            artwork::resolve_cover_art_url,
             secure_storage::save_secure_value,
             secure_storage::read_secure_value,
             secure_storage::delete_secure_value

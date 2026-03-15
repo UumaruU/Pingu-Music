@@ -1,17 +1,21 @@
 import { cacheService } from "./cacheService";
-
-interface CoverArtArchiveResponse {
-  images?: Array<{
-    front?: boolean;
-    image?: string;
-    thumbnails?: {
-      large?: string;
-      small?: string;
-    };
-  }>;
-}
+import { tauriBridge } from "./tauriBridge";
 
 const PLACEHOLDER_COVER_URL = "https://placehold.co/300x300?text=Pingu+Music";
+
+function requiresArtworkRevalidation(url: string | undefined) {
+  const normalizedUrl = (url ?? "").trim().toLowerCase();
+
+  if (!normalizedUrl) {
+    return false;
+  }
+
+  return (
+    normalizedUrl.includes("coverartarchive.org") ||
+    normalizedUrl.includes(".archive.org") ||
+    normalizedUrl.includes("ca.archive.org")
+  );
+}
 
 export const coverArtService = {
   async resolveCoverUrl(releaseId: string | undefined, sourceCoverUrl: string) {
@@ -21,24 +25,17 @@ export const coverArtService = {
 
     const cachedUrl = await cacheService.get<string>("artwork", releaseId);
 
-    if (cachedUrl) {
+    if (cachedUrl && !requiresArtworkRevalidation(cachedUrl)) {
       return cachedUrl;
     }
 
     try {
-      const response = await fetch(`https://coverartarchive.org/release/${releaseId}`);
+      if (tauriBridge.isTauriRuntime()) {
+        const resolvedUrl = await tauriBridge.resolveCoverArtUrl(releaseId);
 
-      if (response.ok) {
-        const data = (await response.json()) as CoverArtArchiveResponse;
-        const frontCover =
-          data.images?.find((image) => image.front)?.thumbnails?.large ??
-          data.images?.find((image) => image.front)?.image ??
-          data.images?.[0]?.thumbnails?.large ??
-          data.images?.[0]?.image;
-
-        if (frontCover) {
-          await cacheService.set("artwork", releaseId, frontCover);
-          return frontCover;
+        if (resolvedUrl) {
+          await cacheService.set("artwork", releaseId, resolvedUrl);
+          return resolvedUrl;
         }
       }
     } catch {

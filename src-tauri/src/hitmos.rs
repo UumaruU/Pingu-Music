@@ -1,14 +1,16 @@
+use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tauri::Manager;
 
 const HITMOS_BASE_URL: &str = "https://rus.hitmotop.com";
 const MAX_PARSED_TRACKS_PER_PAGE: usize = 240;
+pub const DOWNLOAD_FILE_PREFIX: &str = "pm_";
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -91,6 +93,48 @@ fn sanitize_track_id(track_id: &str) -> String {
     } else {
         sanitized
     }
+}
+
+pub fn encode_track_id(track_id: &str) -> String {
+    URL_SAFE_NO_PAD.encode(track_id.as_bytes())
+}
+
+fn decode_track_id(stem: &str) -> Option<String> {
+    if !stem.starts_with(DOWNLOAD_FILE_PREFIX) {
+        return None;
+    }
+
+    let encoded = stem.trim_start_matches(DOWNLOAD_FILE_PREFIX);
+    let decoded = URL_SAFE_NO_PAD.decode(encoded.as_bytes()).ok()?;
+    String::from_utf8(decoded).ok()
+}
+
+pub fn is_supported_audio_extension(extension: &str) -> bool {
+    matches!(
+        extension.to_ascii_lowercase().as_str(),
+        "mp3" | "m4a" | "mp4" | "aac" | "ogg" | "oga" | "opus" | "wav" | "flac" | "webm"
+    )
+}
+
+fn mime_type_from_extension(extension: &str) -> &'static str {
+    match extension.to_ascii_lowercase().as_str() {
+        "mp3" => "audio/mpeg",
+        "m4a" | "mp4" => "audio/mp4",
+        "aac" => "audio/aac",
+        "ogg" | "oga" | "opus" => "audio/ogg",
+        "wav" => "audio/wav",
+        "flac" => "audio/flac",
+        "webm" => "audio/webm",
+        _ => "application/octet-stream",
+    }
+}
+
+fn mime_type_for_path(path: &Path) -> String {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .map(mime_type_from_extension)
+        .unwrap_or("application/octet-stream")
+        .to_string()
 }
 
 fn build_http_client() -> Result<reqwest::Client, String> {
@@ -197,12 +241,51 @@ async fn fetch_track_bytes(audio_url: &str) -> Result<Vec<u8>, String> {
         .map_err(|error| format!("Failed to read track payload: {error}"))
 }
 
-fn to_track_blob(bytes: Vec<u8>) -> TrackBlobResult {
-    let base64_data = base64::engine::general_purpose::STANDARD.encode(bytes);
+fn to_track_blob(bytes: Vec<u8>, mime_type: &str) -> TrackBlobResult {
+    let base64_data = STANDARD.encode(bytes);
     TrackBlobResult {
-        mime_type: "audio/mpeg".to_string(),
+        mime_type: mime_type.to_string(),
         base64_data,
     }
+}
+
+fn decode_track_id_from_stem(stem: &str) -> String {
+    decode_track_id(stem).unwrap_or_else(|| stem.to_string())
+}
+
+pub fn find_existing_download(downloads_dir: &Path, track_id: &str) -> Option<PathBuf> {
+    let encoded_track_id = encode_track_id(track_id);
+    let expected_stem = format!("{DOWNLOAD_FILE_PREFIX}{encoded_track_id}");
+    let mut matches = Vec::new();
+
+    let entries = fs::read_dir(downloads_dir).ok()?;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+
+        if !path.is_file() {
+            continue;
+        }
+
+        let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
+            continue;
+        };
+
+        if !is_supported_audio_extension(extension) {
+            continue;
+        }
+
+        let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
+            continue;
+        };
+
+        if stem == expected_stem {
+            matches.push(path);
+        }
+    }
+
+    matches.sort();
+    matches.pop()
 }
 
 #[tauri::command]
@@ -277,7 +360,7 @@ pub async fn get_hitmos_track_blob(audio_url: String) -> Result<TrackBlobResult,
     }
 
     let bytes = fetch_track_bytes(normalized_url).await?;
-    Ok(to_track_blob(bytes))
+    Ok(to_track_blob(bytes, "audio/mpeg"))
 }
 
 #[tauri::command]
@@ -295,7 +378,8 @@ pub fn get_local_track_blob(local_path: String) -> Result<TrackBlobResult, Strin
     }
 
     let bytes = fs::read(path).map_err(|error| format!("Failed to read local track file: {error}"))?;
-    Ok(to_track_blob(bytes))
+    let mime_type = mime_type_for_path(path);
+    Ok(to_track_blob(bytes, &mime_type))
 }
 
 #[tauri::command]
@@ -344,16 +428,16 @@ pub fn list_local_downloads(app: tauri::AppHandle) -> Result<Vec<LocalDownloadEn
             continue;
         };
 
-        if !extension.eq_ignore_ascii_case("mp3") {
+        if !is_supported_audio_extension(extension) {
             continue;
         }
 
-        let Some(track_id) = path.file_stem().and_then(|stem| stem.to_str()) else {
+        let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
             continue;
         };
 
         downloads.push(LocalDownloadEntry {
-            track_id: track_id.to_string(),
+            track_id: decode_track_id_from_stem(stem),
             local_path: path.to_string_lossy().to_string(),
         });
     }

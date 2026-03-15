@@ -18,9 +18,12 @@ export type EntityLoadStatus = "idle" | "loading" | "ready" | "failed";
 export type AuthStatus = "idle" | "loading" | "authenticated" | "guest" | "error";
 export type SyncStatus = "idle" | "syncing" | "synced" | "error";
 export type AuthError = string | null;
+export type ProviderId = "hitmos" | "soundcloud" | "telegram";
 
 export interface Track {
   id: string;
+  providerId: ProviderId;
+  providerTrackId?: string;
   title: string;
   artist: string;
   coverUrl: string;

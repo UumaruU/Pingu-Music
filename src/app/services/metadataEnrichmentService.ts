@@ -1,4 +1,5 @@
 import { useAppStore } from "../store/appStore";
+import { withTrackProviderDefaults } from "../core/tracks/trackIdentity";
 import { Artist, Release, Track } from "../types";
 import { cacheService } from "./cacheService";
 import { coverArtService } from "./coverArtService";
@@ -37,7 +38,7 @@ class MetadataEnrichmentService {
   private activeRequests = new Map<string, Promise<Track | null>>();
 
   private hydrateCachedTrack(trackId: string, cachedTrack: Track) {
-    useAppStore.getState().setTrackMetadata(trackId, cachedTrack);
+    useAppStore.getState().setTrackMetadata(trackId, withTrackProviderDefaults(cachedTrack));
   }
 
   private async enrichFreshTrack(track: Track) {
@@ -72,7 +73,7 @@ class MetadataEnrichmentService {
 
     if (!bestMatch || bestMatch.score < 70) {
       const failedTrack = {
-        ...useAppStore.getState().tracks[track.id],
+        ...withTrackProviderDefaults(useAppStore.getState().tracks[track.id] ?? track),
         normalizedTitle,
         normalizedArtistName,
         metadataStatus: "failed" as const,
@@ -113,7 +114,7 @@ class MetadataEnrichmentService {
     }
 
     const enrichedTrack: Track = {
-      ...useAppStore.getState().tracks[track.id],
+      ...withTrackProviderDefaults(useAppStore.getState().tracks[track.id] ?? track),
       coverUrl,
       normalizedTitle,
       normalizedArtistName,

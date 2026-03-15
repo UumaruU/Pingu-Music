@@ -6,9 +6,11 @@ import { AppVersionBadge } from "./components/AppVersionBadge";
 import { PlayerBar } from "./components/PlayerBar";
 import { SearchBar } from "./components/SearchBar";
 import { Sidebar } from "./components/Sidebar";
+import { initializeApp } from "./bootstrap/appBootstrap";
 import { useDebouncedValue } from "./hooks/useDebouncedValue";
 import { useHashRoute } from "./hooks/useHashRoute";
 import { HomePage } from "./pages/HomePage";
+import { downloadService } from "./services/downloadService";
 import { useAppStore } from "./store/appStore";
 import { useAuthStore } from "./store/authStore";
 import { ListenHistoryEntry, RouteId, Track } from "./types";
@@ -65,8 +67,7 @@ const loadArtistService = () =>
   import("./services/artistService").then((module) => module.artistService);
 const loadCacheService = () =>
   import("./services/cacheService").then((module) => module.cacheService);
-const loadDownloadService = () =>
-  import("./services/downloadService").then((module) => module.downloadService);
+const loadDownloadService = () => Promise.resolve(downloadService);
 const loadFavoritesService = () =>
   import("./services/favoritesService").then((module) => module.favoritesService);
 const loadLyricsService = () =>
@@ -76,9 +77,9 @@ const loadMetadataEnrichmentService = () =>
     (module) => module.metadataEnrichmentService,
   );
 const loadMusicService = () =>
-  import("./services/musicService").then((module) => module.musicService);
+  import("./services/music/musicService").then((module) => module.musicService);
 const loadPlayerService = () =>
-  import("./services/playerService").then((module) => module.playerService);
+  import("./services/player/playerService").then((module) => module.playerService);
 const loadPlaylistService = () =>
   import("./services/playlistService").then((module) => module.playlistService);
 
@@ -438,25 +439,16 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
-    cleanupListenHistory();
-
-    void Promise.all([loadPlayerService(), loadCacheService(), loadDownloadService()]).then(
-      async ([playerService, cacheService, downloadService]) => {
-        if (cancelled) {
-          return;
-        }
-
-        playerService.initialize();
-        await downloadService.restoreDownloadsFromDisk();
-
-        if (cancelled) {
-          return;
-        }
-
-        playerService.hydrateFromStore();
-        void cacheService.cleanupExpired();
-      },
-    );
+    void initializeApp({
+      cleanupListenHistory,
+      loadPlayerService,
+      loadCacheService,
+      loadDownloadService,
+    }).then(() => {
+      if (cancelled) {
+        return;
+      }
+    });
 
     return () => {
       cancelled = true;

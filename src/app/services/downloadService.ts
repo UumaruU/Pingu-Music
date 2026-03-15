@@ -1,4 +1,4 @@
-﻿import { useAppStore } from "../store/appStore";
+import { useAppStore } from "../store/appStore";
 import { tauriBridge } from "./tauriBridge";
 
 class DownloadService {
@@ -42,14 +42,17 @@ class DownloadService {
       useAppStore.getState().setTrackDownloadState(trackId, "downloading");
 
       try {
-        const result = await tauriBridge.saveTrack(trackId, track.audioUrl);
+        const result = await tauriBridge.saveTrack(track);
         const freshTrack = useAppStore.getState().tracks[trackId];
         const isStillFavorite = !!freshTrack?.isFavorite;
 
         if (!isStillFavorite) {
           await this.deleteLocalFile(result.localPath);
           useAppStore.getState().setTrackDownloadState(trackId, "idle", undefined, undefined);
-          console.info("[download] Track removed after unfavorite", { trackId, localPath: result.localPath });
+          console.info("[download] Track removed after unfavorite", {
+            trackId,
+            localPath: result.localPath,
+          });
           return null;
         }
 

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { LocalDownloadEntry } from "../types";
+import type { LocalDownloadEntry, Track } from "../types";
 
 interface DownloadResult {
   localPath: string;
@@ -19,6 +19,21 @@ export interface HitmosTrackDto {
   duration: number;
   sourceUrl: string;
 }
+
+export interface SoundcloudTrackDto {
+  id: string;
+  title: string;
+  artist: string;
+  coverUrl: string;
+  audioUrl: string;
+  duration: number;
+  sourceUrl: string;
+}
+
+type BridgeTrackRef = Pick<
+  Track,
+  "id" | "providerId" | "title" | "artist" | "audioUrl" | "sourceUrl"
+>;
 
 function isTauriRuntime() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -45,17 +60,57 @@ export const tauriBridge = {
     return invoke<HitmosTrackDto[]>("search_hitmos", { query });
   },
 
-  async saveTrack(trackId: string, audioUrl: string): Promise<DownloadResult> {
-    if (isTauriRuntime()) {
-      return invoke<DownloadResult>("save_hitmos_track", { trackId, audioUrl });
+  async searchSoundcloud(query: string): Promise<SoundcloudTrackDto[]> {
+    if (!isTauriRuntime()) {
+      return [];
     }
 
-    return { localPath: `downloads/${trackId}.mp3` };
+    return invoke<SoundcloudTrackDto[]>("search_soundcloud", { query });
   },
 
-  async getTrackBlob(audioUrl: string): Promise<TrackBlobResult> {
+  async resolveSoundcloudStream(sourceUrl: string): Promise<string> {
+    if (!isTauriRuntime()) {
+      return sourceUrl;
+    }
+
+    return invoke<string>("resolve_soundcloud_stream", { sourceUrl });
+  },
+
+  async resolveCoverArtUrl(releaseId: string): Promise<string | null> {
+    if (!isTauriRuntime()) {
+      return null;
+    }
+
+    return invoke<string | null>("resolve_cover_art_url", { releaseId });
+  },
+
+  async saveTrack(track: BridgeTrackRef): Promise<DownloadResult> {
     if (isTauriRuntime()) {
-      return invoke<TrackBlobResult>("get_hitmos_track_blob", { audioUrl });
+      if (track.providerId === "soundcloud") {
+        return invoke<DownloadResult>("save_soundcloud_track", {
+          trackId: track.id,
+          sourceUrl: track.sourceUrl || track.audioUrl,
+          title: track.title,
+          artist: track.artist,
+        });
+      }
+
+      return invoke<DownloadResult>("save_hitmos_track", {
+        trackId: track.id,
+        audioUrl: track.audioUrl,
+      });
+    }
+
+    return { localPath: `downloads/${track.id}.mp3` };
+  },
+
+  async getTrackBlob(track: BridgeTrackRef): Promise<TrackBlobResult> {
+    if (isTauriRuntime()) {
+      if (track.providerId === "soundcloud") {
+        throw new Error("Blob playback is not available for SoundCloud tracks");
+      }
+
+      return invoke<TrackBlobResult>("get_hitmos_track_blob", { audioUrl: track.audioUrl });
     }
 
     throw new Error("Blob fallback is available only in Tauri runtime");
