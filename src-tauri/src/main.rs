@@ -1,9 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod artwork;
 mod hitmos;
+mod lmusic;
 mod secure_storage;
 mod soundcloud;
-mod artwork;
 
 fn main() {
     tauri::Builder::default()
@@ -16,6 +17,10 @@ fn main() {
             hitmos::get_local_track_blob,
             hitmos::delete_local_track,
             hitmos::list_local_downloads,
+            lmusic::search_lmusic,
+            lmusic::get_lmusic_artist_metadata,
+            lmusic::save_lmusic_track,
+            lmusic::get_lmusic_track_blob,
             soundcloud::search_soundcloud,
             soundcloud::resolve_soundcloud_stream,
             soundcloud::save_soundcloud_track,

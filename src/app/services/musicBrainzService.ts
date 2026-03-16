@@ -28,6 +28,7 @@ interface MusicBrainzRecordingDto {
   id: string;
   score: number;
   title: string;
+  length?: number;
   "first-release-date"?: string;
   "artist-credit"?: MusicBrainzArtistCreditDto[];
   releases?: MusicBrainzReleaseDto[];
@@ -93,6 +94,7 @@ export interface RecordingMatch {
   recordingId: string;
   title: string;
   score: number;
+  length?: number;
   artistId?: string;
   artistName?: string;
   releaseId?: string;
@@ -238,8 +240,7 @@ class MusicBrainzService {
     return value.replace(/([\\"])/g, "\\$1");
   }
 
-  async searchRecording(title: string, artist: string) {
-    const query = `recording:"${this.escapeLuceneValue(title)}" AND artist:"${this.escapeLuceneValue(artist)}"`;
+  private async searchRecordings(query: string) {
     const response = await this.request<MusicBrainzRecordingsResponse>("recording/", {
       query,
       limit: 5,
@@ -254,6 +255,7 @@ class MusicBrainzService {
         recordingId: recording.id,
         title: recording.title,
         score: recording.score,
+        length: recording.length,
         artistId: primaryArtist?.artist?.id,
         artistName: primaryArtist?.artist?.name ?? primaryArtist?.name,
         releaseId: release?.id,
@@ -263,6 +265,16 @@ class MusicBrainzService {
         releaseCountry: release?.country,
       };
     });
+  }
+
+  async searchRecording(title: string, artist: string) {
+    const query = `recording:"${this.escapeLuceneValue(title)}" AND artist:"${this.escapeLuceneValue(artist)}"`;
+    return this.searchRecordings(query);
+  }
+
+  async searchRecordingByTitle(title: string) {
+    const query = `recording:"${this.escapeLuceneValue(title)}"`;
+    return this.searchRecordings(query);
   }
 
   async searchArtist(name: string): Promise<ArtistMatch[]> {

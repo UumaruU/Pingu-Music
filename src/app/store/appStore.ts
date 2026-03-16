@@ -1,7 +1,14 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import { CANONICALIZATION_VERSION } from "../config/canonicalizationConfig";
+import { pickBestCoverUrl } from "../services/coverUrlService";
+import { mergeArtistMetadata } from "../utils/artistMetadata";
 import {
   Artist,
+  CanonicalAliasTarget,
+  CanonicalTrack,
+  CanonicalizationResult,
+  CanonicalizationVersion,
   EntityLoadStatus,
   ListenHistoryEntry,
   LocalDownloadEntry,
@@ -20,6 +27,8 @@ type TrackMap = Record<string, Track>;
 type ArtistMap = Record<string, Artist>;
 type ReleaseMap = Record<string, Release>;
 type LyricsMap = Record<string, Lyrics>;
+type CanonicalTrackMap = Record<string, CanonicalTrack>;
+type CanonicalAliasMap = Record<string, CanonicalAliasTarget>;
 
 const defaultPlayerSettings: PlayerSettings = {
   volume: 0.75,
@@ -102,7 +111,18 @@ interface AppState {
   releaseStatuses: Record<string, EntityLoadStatus>;
   popularTrackIds: string[];
   searchResultIds: string[];
+  searchVariantResultIds: string[];
+  searchCanonicalResultIds: string[];
   searchQuery: string;
+  searchSetIds: string[];
+  activeSearchSetId: string | null;
+  searchCanonicalResult: CanonicalizationResult | null;
+  canonicalTracksById: CanonicalTrackMap;
+  canonicalIdByVariantTrackId: Record<string, string>;
+  variantTrackIdsByCanonicalId: Record<string, string[]>;
+  canonicalAliasById: CanonicalAliasMap;
+  canonicalizationVersion: CanonicalizationVersion;
+  canonicalizationRevision: number;
   searchStatus: SearchStatus;
   searchError: string | null;
   recentSearches: RecentSearch[];
@@ -126,6 +146,9 @@ interface AppState {
     status: SearchStatus;
     error?: string | null;
   }) => void;
+  setActiveSearchSet: (searchSetId: string, trackIds: string[]) => void;
+  clearSearchCanonicalization: () => void;
+  setSearchCanonicalization: (result: CanonicalizationResult) => void;
   addRecentSearch: (query: string) => void;
   addListenHistory: (trackId: string) => void;
   cleanupListenHistory: () => void;
@@ -231,7 +254,14 @@ function mergeTrack(
 
   return {
     ...normalizedNextTrack,
-    coverUrl: metadataTrack.coverUrl || normalizedNextTrack.coverUrl,
+    coverUrl:
+      pickBestCoverUrl(
+        normalizedExistingTrack?.coverUrl,
+        metadataTrack.coverUrl,
+        normalizedNextTrack.coverUrl,
+      ) ||
+      metadataTrack.coverUrl ||
+      normalizedNextTrack.coverUrl,
     isFavorite,
     downloadState: isFavorite
       ? normalizedExistingTrack?.downloadState ?? normalizedNextTrack.downloadState
@@ -259,6 +289,23 @@ function mergeTrack(
     metadataStatus: normalizedExistingTrack?.metadataStatus ?? normalizedNextTrack.metadataStatus,
     albumTitle: normalizedExistingTrack?.albumTitle ?? normalizedNextTrack.albumTitle,
     releaseDate: normalizedExistingTrack?.releaseDate ?? normalizedNextTrack.releaseDate,
+    explicit: normalizedExistingTrack?.explicit ?? normalizedNextTrack.explicit ?? null,
+    normalizedTitleCore:
+      normalizedExistingTrack?.normalizedTitleCore ?? normalizedNextTrack.normalizedTitleCore,
+    normalizedArtistCore:
+      normalizedExistingTrack?.normalizedArtistCore ?? normalizedNextTrack.normalizedArtistCore,
+    primaryArtist: normalizedExistingTrack?.primaryArtist ?? normalizedNextTrack.primaryArtist,
+    titleFlavor:
+      normalizedExistingTrack?.titleFlavor?.length
+        ? normalizedExistingTrack.titleFlavor
+        : normalizedNextTrack.titleFlavor,
+    canonicalId: normalizedExistingTrack?.canonicalId ?? normalizedNextTrack.canonicalId,
+    acoustId: normalizedExistingTrack?.acoustId ?? normalizedNextTrack.acoustId,
+    fingerprintStatus:
+      normalizedExistingTrack?.fingerprintStatus ?? normalizedNextTrack.fingerprintStatus,
+    sourcePriority: normalizedExistingTrack?.sourcePriority ?? normalizedNextTrack.sourcePriority,
+    sourceTrustScore:
+      normalizedExistingTrack?.sourceTrustScore ?? normalizedNextTrack.sourceTrustScore,
   };
 }
 
@@ -276,7 +323,18 @@ export const useAppStore = create<AppState>()(
       releaseStatuses: {},
       popularTrackIds: [],
       searchResultIds: [],
+      searchVariantResultIds: [],
+      searchCanonicalResultIds: [],
       searchQuery: "",
+      searchSetIds: [],
+      activeSearchSetId: null,
+      searchCanonicalResult: null,
+      canonicalTracksById: {},
+      canonicalIdByVariantTrackId: {},
+      variantTrackIdsByCanonicalId: {},
+      canonicalAliasById: {},
+      canonicalizationVersion: CANONICALIZATION_VERSION,
+      canonicalizationRevision: 0,
       searchStatus: "idle",
       searchError: null,
       recentSearches: [],
@@ -326,9 +384,76 @@ export const useAppStore = create<AppState>()(
         set({
           searchQuery: query,
           searchResultIds: trackIds,
+          searchVariantResultIds: trackIds,
           searchStatus: status,
           searchError: error,
         });
+      },
+      setActiveSearchSet: (searchSetId, trackIds) => {
+        set((state) => ({
+          activeSearchSetId: searchSetId,
+          searchSetIds: [searchSetId, ...state.searchSetIds.filter((id) => id !== searchSetId)].slice(
+            0,
+            5,
+          ),
+          searchResultIds: trackIds,
+          searchVariantResultIds: trackIds,
+        }));
+      },
+      clearSearchCanonicalization: () => {
+        set({
+          activeSearchSetId: null,
+          searchSetIds: [],
+          searchCanonicalResult: null,
+          searchCanonicalResultIds: [],
+          canonicalTracksById: {},
+          canonicalIdByVariantTrackId: {},
+          variantTrackIdsByCanonicalId: {},
+          canonicalAliasById: {},
+          canonicalizationRevision: 0,
+        });
+      },
+      setSearchCanonicalization: (result) => {
+        set((state) => ({
+          activeSearchSetId: result.searchSetId,
+          searchSetIds: [
+            result.searchSetId,
+            ...state.searchSetIds.filter((searchSetId) => searchSetId !== result.searchSetId),
+          ].slice(0, 5),
+          searchCanonicalResult: result,
+          searchCanonicalResultIds: result.searchCanonicalResultIds,
+          canonicalTracksById: result.canonicalById,
+          canonicalIdByVariantTrackId: result.canonicalIdByVariantTrackId,
+          variantTrackIdsByCanonicalId: result.variantTrackIdsByCanonicalId,
+          canonicalAliasById: {
+            ...state.canonicalAliasById,
+            ...result.aliasTargetsByCanonicalId,
+          },
+          canonicalizationVersion: result.canonicalizationVersion,
+          canonicalizationRevision: result.canonicalizationRevision,
+          tracks: Object.fromEntries(
+            Object.entries(state.tracks).map(([trackId, track]) => [
+              trackId,
+              result.canonicalIdByVariantTrackId[trackId]
+                ? {
+                    ...track,
+                    canonicalId: result.canonicalIdByVariantTrackId[trackId],
+                  }
+                : track,
+            ]),
+          ),
+          downloadedTracks: Object.fromEntries(
+            Object.entries(state.downloadedTracks).map(([trackId, track]) => [
+              trackId,
+              result.canonicalIdByVariantTrackId[trackId]
+                ? {
+                    ...track,
+                    canonicalId: result.canonicalIdByVariantTrackId[trackId],
+                  }
+                : track,
+            ]),
+          ),
+        }));
       },
       addRecentSearch: (query) => {
         const normalized = query.trim();
@@ -543,7 +668,9 @@ export const useAppStore = create<AppState>()(
         set((state) => ({
           artists: {
             ...state.artists,
-            ...Object.fromEntries(artists.map((artist) => [artist.id, artist])),
+            ...Object.fromEntries(
+              artists.map((artist) => [artist.id, mergeArtistMetadata(state.artists[artist.id], artist)]),
+            ),
           },
           artistStatuses: {
             ...state.artistStatuses,
@@ -690,7 +817,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: "app-state",
-      version: 10,
+      version: 11,
       storage: createJSONStorage(() => localStorage),
       migrate: (persistedState) => {
         const state = persistedState as Partial<AppState> | undefined;
@@ -745,6 +872,17 @@ export const useAppStore = create<AppState>()(
           releaseStatuses: {},
           popularTrackIds: [],
           searchResultIds: [],
+          searchVariantResultIds: [],
+          searchCanonicalResultIds: [],
+          searchSetIds: [],
+          activeSearchSetId: null,
+          searchCanonicalResult: null,
+          canonicalTracksById: {},
+          canonicalIdByVariantTrackId: {},
+          variantTrackIdsByCanonicalId: {},
+          canonicalAliasById: {},
+          canonicalizationVersion: CANONICALIZATION_VERSION,
+          canonicalizationRevision: 0,
           searchStatus: "idle",
           searchError: null,
           recentSearches: Array.isArray(state.recentSearches) ? state.recentSearches : [],

@@ -18,7 +18,60 @@ export type EntityLoadStatus = "idle" | "loading" | "ready" | "failed";
 export type AuthStatus = "idle" | "loading" | "authenticated" | "guest" | "error";
 export type SyncStatus = "idle" | "syncing" | "synced" | "error";
 export type AuthError = string | null;
-export type ProviderId = "hitmos" | "soundcloud" | "telegram";
+export type ProviderId = "hitmos" | "lmusic" | "soundcloud" | "telegram";
+export type CanonicalTrackId = string;
+export type TitleFlavor =
+  | "original"
+  | "live"
+  | "acoustic"
+  | "instrumental"
+  | "karaoke"
+  | "remix"
+  | "edit"
+  | "radio_edit"
+  | "extended"
+  | "demo"
+  | "cover"
+  | "versioned_unknown";
+export type FingerprintStatus = "missing" | "pending" | "ready" | "failed";
+export type CanonicalReasonCode =
+  | "same_mb_recording_id"
+  | "same_acoustid"
+  | "title_core_exact"
+  | "artist_core_exact"
+  | "duration_close"
+  | "flavor_conflict"
+  | "conflicting_mb_recording_ids"
+  | "primary_artist_conflict"
+  | "duration_too_far"
+  | "title_too_different";
+export type CanonicalizationVersion = number;
+export type CanonicalClusterRevision = number;
+export type CanonicalIdRemapReason = "identifier_upgrade" | "cluster_split" | "cluster_recompute";
+
+export interface CanonicalizationConfig {
+  strictMergeThreshold: number;
+  relaxedMergeThreshold: number;
+  maxDurationDeltaMsStrict: number;
+  maxDurationDeltaMsRelaxed: number;
+  titleExactBoost: number;
+  artistExactBoost: number;
+  mbRecordingMatchBoost: number;
+  acoustIdMatchBoost: number;
+  titleFlavorConflictPenalty: number;
+  artistMismatchPenalty: number;
+  durationMismatchPenalty: number;
+  blockOnFlavorConflict: boolean;
+  blockOnConflictingMbRecordingIds: boolean;
+  blockOnPrimaryArtistConflict: boolean;
+  enableTrackCanonicalization: boolean;
+  enableAggressiveDedup: boolean;
+  enableFingerprintFallback: boolean;
+  lyricsDurationBucketMs: number;
+  minCanonicalConfidenceForLyricsReuse: number;
+  sourcePriorityByProvider: Record<ProviderId, number>;
+  sourceTrustByProvider: Record<ProviderId, number>;
+}
 
 export interface Track {
   id: string;
@@ -43,6 +96,16 @@ export interface Track {
   metadataStatus: MetadataStatus;
   albumTitle?: string;
   releaseDate?: string;
+  explicit?: boolean | null;
+  normalizedTitleCore?: string;
+  normalizedArtistCore?: string;
+  primaryArtist?: string;
+  titleFlavor?: TitleFlavor[];
+  canonicalId?: CanonicalTrackId;
+  acoustId?: string;
+  fingerprintStatus?: FingerprintStatus;
+  sourceTrustScore?: number;
+  sourcePriority?: number;
 }
 
 export interface Artist {
@@ -148,4 +211,97 @@ export interface AuthState {
   isLoading: boolean;
   authError: AuthError;
   status: AuthStatus;
+}
+
+export interface CanonicalAliasTarget {
+  canonicalId: CanonicalTrackId;
+  searchSetId: string;
+  canonicalizationVersion: CanonicalizationVersion;
+  canonicalizationRevision: number;
+  clusterRevision: CanonicalClusterRevision;
+  reason: CanonicalIdRemapReason;
+}
+
+export interface CanonicalIdRemap {
+  fromCanonicalId: CanonicalTrackId;
+  toCanonicalId: CanonicalTrackId;
+  searchSetId: string;
+  canonicalizationVersion: CanonicalizationVersion;
+  canonicalizationRevision: number;
+  clusterRevision: CanonicalClusterRevision;
+  reason: CanonicalIdRemapReason;
+  variantTrackIds: string[];
+  occurredAt: string;
+}
+
+export interface CanonicalPairScoringResult {
+  leftTrackId: string;
+  rightTrackId: string;
+  score: number;
+  reasons: CanonicalReasonCode[];
+  blockers: CanonicalReasonCode[];
+}
+
+export interface CanonicalDebugInfo {
+  blockingKeys: string[];
+  pairScoring: CanonicalPairScoringResult[];
+  mergeBlockers: CanonicalReasonCode[];
+  clusterReasons: CanonicalReasonCode[];
+  aliasRemapHistory: CanonicalIdRemap[];
+}
+
+export interface CanonicalTrack {
+  canonicalId: CanonicalTrackId;
+  searchSetId: string;
+  canonicalizationVersion: CanonicalizationVersion;
+  canonicalizationRevision: number;
+  clusterRevision: CanonicalClusterRevision;
+  title: string;
+  artist: string;
+  album?: string | null;
+  coverUrl?: string | null;
+  lyrics?: string | null;
+  explicit?: boolean | null;
+  normalizedTitleCore?: string | null;
+  normalizedArtistCore?: string | null;
+  primaryArtist?: string | null;
+  titleFlavor: TitleFlavor[];
+  targetDuration?: number | null;
+  variantTrackIds: string[];
+  preferredVariantId?: string | null;
+  musicBrainzRecordingId?: string | null;
+  musicBrainzArtistId?: string | null;
+  musicBrainzReleaseId?: string | null;
+  musicBrainzReleaseGroupId?: string | null;
+  acoustId?: string | null;
+  provenance?: {
+    title?: string;
+    artist?: string;
+    album?: string;
+    coverUrl?: string;
+    lyrics?: string;
+    targetDuration?: string;
+    preferredVariantId?: string;
+  };
+  quality?: {
+    clusterConfidence?: number;
+    dedupReason?: CanonicalReasonCode[];
+    lastComputedAt?: string;
+    sourcePriority?: number;
+    sourceTrustScore?: number;
+  };
+  debugInfo?: CanonicalDebugInfo;
+}
+
+export interface CanonicalizationResult {
+  searchSetId: string;
+  canonicalizationVersion: CanonicalizationVersion;
+  canonicalizationRevision: number;
+  canonicalTracks: CanonicalTrack[];
+  canonicalById: Record<CanonicalTrackId, CanonicalTrack>;
+  canonicalIdByVariantTrackId: Record<string, CanonicalTrackId>;
+  variantTrackIdsByCanonicalId: Record<CanonicalTrackId, string[]>;
+  searchCanonicalResultIds: CanonicalTrackId[];
+  aliasTargetsByCanonicalId: Record<CanonicalTrackId, CanonicalAliasTarget>;
+  remaps: CanonicalIdRemap[];
 }

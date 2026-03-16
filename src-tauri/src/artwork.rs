@@ -52,11 +52,7 @@ fn collect_cover_urls(payload: CoverArtArchiveResponse) -> Vec<String> {
         }
     }
 
-    if let Some(image) = primary
-        .image
-        .clone()
-        .filter(|url| !url.trim().is_empty())
-    {
+    if let Some(image) = primary.image.clone().filter(|url| !url.trim().is_empty()) {
         if !urls.iter().any(|existing| existing == &image) {
             urls.push(image);
         }

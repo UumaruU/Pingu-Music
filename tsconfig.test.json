@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": ".test-dist",
+    "rootDir": ".",
+    "module": "CommonJS",
+    "moduleResolution": "Node"
+  },
+  "include": [
+    "src/app/services/normalizationService.ts",
+    "src/app/services/trackCanonicalizationService.ts",
+    "src/app/services/canonicalLyricsPolicy.ts",
+    "src/app/services/sourceMetadataService.ts",
+    "src/app/config/**/*.ts",
+    "src/app/types.ts",
+    "tests/**/*.ts"
+  ]
+}

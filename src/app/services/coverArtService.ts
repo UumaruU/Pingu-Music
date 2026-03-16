@@ -1,4 +1,5 @@
 import { cacheService } from "./cacheService";
+import { normalizeCoverUrl, pickBestCoverUrl } from "./coverUrlService";
 import { tauriBridge } from "./tauriBridge";
 
 const PLACEHOLDER_COVER_URL = "https://placehold.co/300x300?text=Pingu+Music";
@@ -20,13 +21,14 @@ function requiresArtworkRevalidation(url: string | undefined) {
 export const coverArtService = {
   async resolveCoverUrl(releaseId: string | undefined, sourceCoverUrl: string) {
     if (!releaseId) {
-      return sourceCoverUrl || PLACEHOLDER_COVER_URL;
+      return normalizeCoverUrl(sourceCoverUrl) || PLACEHOLDER_COVER_URL;
     }
 
     const cachedUrl = await cacheService.get<string>("artwork", releaseId);
+    const normalizedCachedUrl = normalizeCoverUrl(cachedUrl);
 
-    if (cachedUrl && !requiresArtworkRevalidation(cachedUrl)) {
-      return cachedUrl;
+    if (normalizedCachedUrl && !requiresArtworkRevalidation(normalizedCachedUrl)) {
+      return normalizedCachedUrl;
     }
 
     try {
@@ -34,15 +36,16 @@ export const coverArtService = {
         const resolvedUrl = await tauriBridge.resolveCoverArtUrl(releaseId);
 
         if (resolvedUrl) {
-          await cacheService.set("artwork", releaseId, resolvedUrl);
-          return resolvedUrl;
+          const normalizedResolvedUrl = normalizeCoverUrl(resolvedUrl);
+          await cacheService.set("artwork", releaseId, normalizedResolvedUrl);
+          return normalizedResolvedUrl;
         }
       }
     } catch {
       // Fall through to source cover.
     }
 
-    const fallback = sourceCoverUrl || PLACEHOLDER_COVER_URL;
+    const fallback = pickBestCoverUrl(normalizedCachedUrl, sourceCoverUrl) || PLACEHOLDER_COVER_URL;
     await cacheService.set("artwork", releaseId, fallback);
     return fallback;
   },

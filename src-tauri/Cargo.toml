@@ -1,6 +1,6 @@
 [package]
 name = "pingu-music"
-version = "0.1.21"
+version = "0.1.22"
 description = "Pingu Music desktop shell"
 edition = "2021"
 

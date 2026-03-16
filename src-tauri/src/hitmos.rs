@@ -147,7 +147,8 @@ fn build_http_client() -> Result<reqwest::Client, String> {
 
 fn parse_tracks_from_html(html: &str) -> Vec<HitmosTrack> {
     let document = Html::parse_document(html);
-    let item_selector = Selector::parse("li.tracks__item.track.mustoggler").expect("valid selector");
+    let item_selector =
+        Selector::parse("li.tracks__item.track.mustoggler").expect("valid selector");
     let duration_selector = Selector::parse(".track__fulltime").expect("valid selector");
     let source_selector = Selector::parse("a.track__info-l").expect("valid selector");
     let download_selector = Selector::parse("a.track__download-btn").expect("valid selector");
@@ -155,7 +156,10 @@ fn parse_tracks_from_html(html: &str) -> Vec<HitmosTrack> {
     let mut dedupe = HashSet::new();
     let mut tracks = Vec::new();
 
-    for item in document.select(&item_selector).take(MAX_PARSED_TRACKS_PER_PAGE) {
+    for item in document
+        .select(&item_selector)
+        .take(MAX_PARSED_TRACKS_PER_PAGE)
+    {
         let Some(meta_json) = item.value().attr("data-musmeta") else {
             continue;
         };
@@ -183,7 +187,10 @@ fn parse_tracks_from_html(html: &str) -> Vec<HitmosTrack> {
             .and_then(|anchor| anchor.value().attr("href"))
             .map(to_absolute_url)
             .unwrap_or_else(|| {
-                format!("{HITMOS_BASE_URL}/search?q={}", urlencoding::encode(&meta.title))
+                format!(
+                    "{HITMOS_BASE_URL}/search?q={}",
+                    urlencoding::encode(&meta.title)
+                )
             });
 
         let audio_url = item
@@ -377,7 +384,8 @@ pub fn get_local_track_blob(local_path: String) -> Result<TrackBlobResult, Strin
         return Err(format!("Local file does not exist: {normalized_path}"));
     }
 
-    let bytes = fs::read(path).map_err(|error| format!("Failed to read local track file: {error}"))?;
+    let bytes =
+        fs::read(path).map_err(|error| format!("Failed to read local track file: {error}"))?;
     let mime_type = mime_type_for_path(path);
     Ok(to_track_blob(bytes, &mime_type))
 }

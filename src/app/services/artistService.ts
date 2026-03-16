@@ -1,11 +1,13 @@
 import { useAppStore } from "../store/appStore";
 import { Artist, Release, Track } from "../types";
+import { mergeArtistTags } from "../utils/artistMetadata";
 import { cacheService } from "./cacheService";
 import { coverArtService } from "./coverArtService";
 import { metadataEnrichmentService } from "./metadataEnrichmentService";
 import { musicBrainzService } from "./musicBrainzService";
 import { musicService } from "./musicService";
 import { extractPrimaryArtistName, normalizationService } from "./normalizationService";
+import { LmusicArtistDto, tauriBridge } from "./tauriBridge";
 
 interface ReleaseDetailsPayload {
   release: Release;
@@ -26,9 +28,14 @@ interface ReleaseDetailsCachePayload extends ReleaseDetailsPayload {
 const MIN_ACCEPTABLE_SCORE = 55;
 const DISCOGRAPHY_CACHE_SCHEMA_VERSION = 2;
 const RELEASE_DETAILS_CACHE_SCHEMA_VERSION = 6;
+const LMUSIC_ARTIST_CACHE_SCHEMA_VERSION = 1;
 const MIN_CACHED_MATCH_COVERAGE = 0.9;
 const MIN_TITLE_SIMILARITY_FALLBACK = 0.42;
 const RELEASE_BONUS_TITLE_SIMILARITY_THRESHOLD = 0.55;
+
+interface LmusicArtistCachePayload extends LmusicArtistDto {
+  schemaVersion: number;
+}
 
 function getTracksForArtist(artistId: string) {
   const tracks = Object.values(useAppStore.getState().tracks);
@@ -132,6 +139,10 @@ function getReleaseDetailsCacheKey(releaseId: string) {
   return `release:${releaseId}:details`;
 }
 
+function getLmusicArtistCacheKey(artistName: string) {
+  return `lmusic:${normalizeComparableArtistName(artistName)}`;
+}
+
 function dedupeTrackTitles(trackTitles: string[]) {
   const uniqueTitles: string[] = [];
   const seen = new Set<string>();
@@ -173,6 +184,75 @@ class ArtistService {
     string,
     Promise<{ release: Release; tracks: Track[] }>
   >();
+
+  private async getCachedLmusicArtistMetadata(artistName: string) {
+    const cacheKey = getLmusicArtistCacheKey(artistName);
+    const cached = await cacheService.get<LmusicArtistCachePayload | LmusicArtistDto>(
+      "artists",
+      cacheKey,
+    );
+
+    if (!cached) {
+      return null;
+    }
+
+    if ("schemaVersion" in cached) {
+      return cached.schemaVersion === LMUSIC_ARTIST_CACHE_SCHEMA_VERSION ? cached : null;
+    }
+
+    return null;
+  }
+
+  private async getLmusicArtistMetadata(artistName: string) {
+    const normalizedArtistName = artistName.trim();
+
+    if (!normalizedArtistName) {
+      return null;
+    }
+
+    const cached = await this.getCachedLmusicArtistMetadata(normalizedArtistName);
+
+    if (cached) {
+      return cached;
+    }
+
+    const metadata = await tauriBridge.getLmusicArtistMetadata(normalizedArtistName);
+
+    if (!metadata) {
+      return null;
+    }
+
+    const payload: LmusicArtistCachePayload = {
+      ...metadata,
+      schemaVersion: LMUSIC_ARTIST_CACHE_SCHEMA_VERSION,
+    };
+
+    await cacheService.set("artists", getLmusicArtistCacheKey(normalizedArtistName), payload);
+    return payload;
+  }
+
+  private async enrichArtistWithLmusicTags(artist: Artist) {
+    try {
+      const lmusicArtist = await this.getLmusicArtistMetadata(artist.name);
+
+      if (!lmusicArtist?.tags?.length) {
+        return artist;
+      }
+
+      const mergedArtist: Artist = {
+        ...artist,
+        tags: mergeArtistTags(artist.tags, lmusicArtist.tags),
+        imageUrl: artist.imageUrl ?? lmusicArtist.imageUrl,
+      };
+
+      useAppStore.getState().hydrateArtists([mergedArtist]);
+      await cacheService.set("artists", mergedArtist.id, mergedArtist);
+
+      return mergedArtist;
+    } catch {
+      return artist;
+    }
+  }
 
   private hydrateReleaseCovers(
     artistId: string,
@@ -676,6 +756,8 @@ class ArtistService {
           throw error;
         }
       }
+
+      artist = await this.enrichArtistWithLmusicTags(artist);
 
       const cacheKey = getArtistDiscographyCacheKey(artistId);
       const cachedDiscography = await cacheService.get<

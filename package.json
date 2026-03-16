@@ -1,12 +1,13 @@
 {
   "name": "pingu-music",
   "private": true,
-  "version": "0.1.21",
+  "version": "0.1.22",
   "type": "module",
   "scripts": {
     "sync:version": "node scripts/sync-version.mjs",
     "build": "node scripts/sync-version.mjs && vite build",
     "dev": "node scripts/sync-version.mjs && vite",
+    "test": "tsc -p tsconfig.test.json && node -e \"require('fs').mkdirSync('.test-dist',{recursive:true});require('fs').writeFileSync('.test-dist/package.json', JSON.stringify({type:'commonjs'}));\" && node --test .test-dist/tests/*.test.js",
     "tauri:dev": "node scripts/sync-version.mjs && tauri dev",
     "tauri:build": "node scripts/sync-version.mjs && tauri build"
   },

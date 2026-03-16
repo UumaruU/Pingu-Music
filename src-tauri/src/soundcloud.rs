@@ -1,4 +1,7 @@
-use crate::hitmos::{find_existing_download, is_supported_audio_extension, DownloadResult, DOWNLOAD_FILE_PREFIX, encode_track_id};
+use crate::hitmos::{
+    encode_track_id, find_existing_download, is_supported_audio_extension, DownloadResult,
+    DOWNLOAD_FILE_PREFIX,
+};
 use serde::Serialize;
 use serde_json::Value;
 use std::fs;
@@ -72,23 +75,99 @@ fn read_first_string_field(value: &Value, keys: &[&str]) -> String {
         .unwrap_or_default()
 }
 
-fn read_thumbnail(value: &Value) -> String {
-    let direct = read_first_string_field(value, &["thumbnail", "artwork_url"]);
+fn read_u64_field(value: &Value, key: &str) -> u64 {
+    value.get(key).and_then(Value::as_u64).unwrap_or_default()
+}
 
-    if !direct.is_empty() {
-        return direct;
+fn get_thumbnail_variant_score(value: &str) -> i64 {
+    let normalized = value.trim().to_ascii_lowercase();
+
+    if normalized.contains("default_avatar") {
+        return 1;
     }
 
-    value
-        .get("thumbnails")
-        .and_then(Value::as_array)
-        .and_then(|thumbnails| thumbnails.iter().find_map(|item| {
-            item.get("url")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|url| !url.is_empty())
-                .map(ToOwned::to_owned)
-        }))
+    if normalized.contains("original") {
+        return 100;
+    }
+
+    if normalized.contains("t500x500") {
+        return 90;
+    }
+
+    if normalized.contains("crop") {
+        return 80;
+    }
+
+    if normalized.contains("t300x300") {
+        return 70;
+    }
+
+    if normalized.contains("large") {
+        return 60;
+    }
+
+    if normalized.contains("t67x67") {
+        return 50;
+    }
+
+    if normalized.contains("badge") {
+        return 40;
+    }
+
+    if normalized.contains("small") {
+        return 30;
+    }
+
+    if normalized.contains("tiny") {
+        return 20;
+    }
+
+    if normalized.contains("mini") {
+        return 10;
+    }
+
+    0
+}
+
+fn read_thumbnail(value: &Value) -> String {
+    let mut candidates = Vec::new();
+
+    for key in ["thumbnail", "artwork_url"] {
+        let candidate = read_string_field(value, key);
+
+        if !candidate.is_empty() {
+            candidates.push((candidate, i64::MAX / 4));
+        }
+    }
+
+    if let Some(thumbnails) = value.get("thumbnails").and_then(Value::as_array) {
+        for item in thumbnails {
+            let url = read_string_field(item, "url");
+
+            if url.is_empty() {
+                continue;
+            }
+
+            let preference = item
+                .get("preference")
+                .and_then(Value::as_i64)
+                .unwrap_or_default();
+            let area = read_u64_field(item, "width").saturating_mul(read_u64_field(item, "height"));
+            let variant = read_string_field(item, "id");
+            let score = preference.saturating_mul(1_000_000)
+                + i64::try_from(area).unwrap_or(i64::MAX / 8)
+                + get_thumbnail_variant_score(&variant).saturating_mul(1_000)
+                + get_thumbnail_variant_score(&url);
+
+            candidates.push((url, score));
+        }
+    }
+
+    candidates.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+    candidates
+        .into_iter()
+        .map(|(url, _)| url)
+        .next()
         .unwrap_or_default()
 }
 

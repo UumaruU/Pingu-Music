@@ -7,10 +7,12 @@ import { PlayerBar } from "./components/PlayerBar";
 import { SearchBar } from "./components/SearchBar";
 import { Sidebar } from "./components/Sidebar";
 import { initializeApp } from "./bootstrap/appBootstrap";
+import { canonicalizationConfig } from "./config/canonicalizationConfig";
 import { useDebouncedValue } from "./hooks/useDebouncedValue";
 import { useHashRoute } from "./hooks/useHashRoute";
 import { HomePage } from "./pages/HomePage";
 import { downloadService } from "./services/downloadService";
+import { trackCanonicalizationService } from "./services/trackCanonicalizationService";
 import { useAppStore } from "./store/appStore";
 import { useAuthStore } from "./store/authStore";
 import { ListenHistoryEntry, RouteId, Track } from "./types";
@@ -409,6 +411,8 @@ export default function App() {
       releaseStatuses: state.releaseStatuses,
       popularTrackIds: state.popularTrackIds,
       searchResultIds: state.searchResultIds,
+      searchCanonicalResultIds: state.searchCanonicalResultIds,
+      canonicalTracksById: state.canonicalTracksById,
       searchStatus: state.searchStatus,
       searchError: state.searchError,
       recentSearches: state.recentSearches,
@@ -557,6 +561,13 @@ export default function App() {
 
     return getTracksByIds(appState.tracks, appState.searchResultIds);
   }, [appState.searchResultIds, appState.tracks, popularTracks, searchValue]);
+  const searchCanonicalTracks = useMemo(
+    () =>
+      appState.searchCanonicalResultIds
+        .map((canonicalId) => appState.canonicalTracksById[canonicalId])
+        .filter(Boolean),
+    [appState.canonicalTracksById, appState.searchCanonicalResultIds],
+  );
 
   const selectedPlaylist = route.playlistId
     ? appState.playlists.find((playlist) => playlist.id === route.playlistId)
@@ -589,6 +600,23 @@ export default function App() {
       .map((trackId) => appState.tracks[trackId])
       .filter((track): track is Track => !!track);
   }, [appState.artistTrackIdsByArtistId, appState.releases, appState.tracks, route.artistId]);
+  const artistCanonicalTracks = useMemo(() => {
+    if (
+      !route.artistId ||
+      !canonicalizationConfig.enableTrackCanonicalization ||
+      !artistTracks.length
+    ) {
+      return [];
+    }
+
+    return trackCanonicalizationService.buildCanonicalizationResult({
+      searchSetId: `artist:${route.artistId}`,
+      canonicalizationRevision: 1,
+      tracks: artistTracks,
+      config: canonicalizationConfig,
+      includeDebugInfo: import.meta.env.DEV || import.meta.env.MODE === "test",
+    }).canonicalTracks;
+  }, [artistTracks, route.artistId]);
 
   useEffect(() => {
     if (route.page !== "artist" || !route.artistId) {
@@ -777,6 +805,8 @@ export default function App() {
       return (
         <SearchPage
           tracks={searchTracks}
+          tracksById={appState.tracks}
+          canonicalTracks={searchCanonicalTracks}
           query={searchValue}
           status={appState.searchStatus}
           error={appState.searchError}
@@ -829,6 +859,8 @@ export default function App() {
           status={routeArtistStatus}
           tracksStatus={routeArtistTracksStatus}
           tracks={artistTracks}
+          tracksById={appState.tracks}
+          canonicalTracks={artistCanonicalTracks}
           albums={artistReleases.albums}
           singles={artistReleases.singles}
           onOpenRelease={(releaseId) =>

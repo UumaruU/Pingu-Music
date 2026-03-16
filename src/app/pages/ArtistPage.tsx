@@ -1,15 +1,18 @@
 import { ReactNode } from "react";
 import { ArrowLeft, Disc3 } from "lucide-react";
+import { CanonicalTrackList } from "../components/CanonicalTrackList";
 import { EmptyState } from "../components/EmptyState";
 import { ImageWithFallback } from "../components/figma/ImageWithFallback";
 import { TrackList } from "../components/TrackList";
-import { Artist, EntityLoadStatus, Release, Track } from "../types";
+import { Artist, CanonicalTrack, EntityLoadStatus, Release, Track } from "../types";
 
 interface ArtistPageProps {
   artist: Artist | undefined;
   status: EntityLoadStatus;
   tracksStatus: EntityLoadStatus;
   tracks: Track[];
+  tracksById: Record<string, Track>;
+  canonicalTracks: CanonicalTrack[];
   albums: Release[];
   singles: Release[];
   currentTrackId: string | null;
@@ -147,12 +150,15 @@ export function ArtistPage({
   status,
   tracksStatus,
   tracks,
+  tracksById,
+  canonicalTracks,
   albums,
   singles,
   onOpenRelease,
   onBack,
   ...trackListProps
 }: ArtistPageProps) {
+  const hasCanonicalTracks = canonicalTracks.length > 0;
   const mergedReleases = [
     ...albums.map((release) => ({ ...release, kind: release.kind ?? "album" })),
     ...singles.map((release) => ({ ...release, kind: release.kind ?? "single" })),
@@ -255,7 +261,14 @@ export function ArtistPage({
         {(status === "loading" && !artist) || (tracksStatus === "loading" && artist && !tracks.length) ? (
           <EmptyState title="Загрузка..." description="Собираем карточку исполнителя и локальные треки." />
         ) : null}
-        {artist && tracks.length ? <TrackList tracks={tracks} {...trackListProps} /> : null}
+        {artist && hasCanonicalTracks ? (
+          <CanonicalTrackList
+            canonicalTracks={canonicalTracks}
+            tracksById={tracksById}
+            {...trackListProps}
+          />
+        ) : null}
+        {artist && !hasCanonicalTracks && tracks.length ? <TrackList tracks={tracks} {...trackListProps} /> : null}
         {status !== "loading" && tracksStatus !== "loading" && (!artist || !tracks.length) ? (
           <EmptyState
             title={artist ? "Треки не найдены" : "Исполнитель не найден"}

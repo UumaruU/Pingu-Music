@@ -34,4 +34,3 @@ pub fn delete_secure_value(key: String) -> Result<(), String> {
         Err(error) => Err(format!("failed to delete secure value: {error}")),
     }
 }
-

@@ -1,9 +1,12 @@
+import { CanonicalTrackList } from "../components/CanonicalTrackList";
 import { EmptyState } from "../components/EmptyState";
 import { TrackList } from "../components/TrackList";
-import { SearchStatus, Track } from "../types";
+import { CanonicalTrack, SearchStatus, Track } from "../types";
 
 interface SearchPageProps {
   tracks: Track[];
+  tracksById: Record<string, Track>;
+  canonicalTracks: CanonicalTrack[];
   currentTrackId: string | null;
   isPlaying: boolean;
   onPlay: (trackId: string, queueIds: string[]) => void;
@@ -25,8 +28,12 @@ export function SearchPage({
   recentQueries,
   onSelectRecentQuery,
   tracks,
+  tracksById,
+  canonicalTracks,
   ...trackListProps
 }: SearchPageProps) {
+  const hasCanonicalResults = !!query.trim() && canonicalTracks.length > 0;
+
   return (
     <div className="space-y-8">
       <section className="rounded-[32px] border border-white/10 bg-white/[0.03] p-8 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
@@ -66,7 +73,15 @@ export function SearchPage({
         />
       ) : null}
 
-      {(status === "success" || (!query.trim() && tracks.length)) && tracks.length ? (
+      {hasCanonicalResults ? (
+        <CanonicalTrackList
+          canonicalTracks={canonicalTracks}
+          tracksById={tracksById}
+          {...trackListProps}
+        />
+      ) : null}
+
+      {!hasCanonicalResults && (status === "success" || (!query.trim() && tracks.length)) && tracks.length ? (
         <TrackList tracks={tracks} {...trackListProps} />
       ) : null}
 

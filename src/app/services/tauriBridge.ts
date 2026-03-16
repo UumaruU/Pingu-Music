@@ -30,6 +30,25 @@ export interface SoundcloudTrackDto {
   sourceUrl: string;
 }
 
+export interface LmusicTrackDto {
+  id: string;
+  title: string;
+  artist: string;
+  coverUrl: string;
+  audioUrl: string;
+  duration: number;
+  sourceUrl: string;
+}
+
+export interface LmusicArtistDto {
+  name: string;
+  slug: string;
+  tags: string[];
+  imageUrl?: string;
+  description?: string;
+  sourceUrl: string;
+}
+
 type BridgeTrackRef = Pick<
   Track,
   "id" | "providerId" | "title" | "artist" | "audioUrl" | "sourceUrl"
@@ -68,6 +87,24 @@ export const tauriBridge = {
     return invoke<SoundcloudTrackDto[]>("search_soundcloud", { query });
   },
 
+  async searchLmusic(query: string): Promise<LmusicTrackDto[]> {
+    if (!isTauriRuntime()) {
+      return [];
+    }
+
+    return invoke<LmusicTrackDto[]>("search_lmusic", { query });
+  },
+
+  async getLmusicArtistMetadata(artistName: string): Promise<LmusicArtistDto | null> {
+    if (!isTauriRuntime()) {
+      return null;
+    }
+
+    return invoke<LmusicArtistDto | null>("get_lmusic_artist_metadata", {
+      artistName,
+    });
+  },
+
   async resolveSoundcloudStream(sourceUrl: string): Promise<string> {
     if (!isTauriRuntime()) {
       return sourceUrl;
@@ -95,6 +132,13 @@ export const tauriBridge = {
         });
       }
 
+      if (track.providerId === "lmusic") {
+        return invoke<DownloadResult>("save_lmusic_track", {
+          trackId: track.id,
+          audioUrl: track.audioUrl,
+        });
+      }
+
       return invoke<DownloadResult>("save_hitmos_track", {
         trackId: track.id,
         audioUrl: track.audioUrl,
@@ -108,6 +152,10 @@ export const tauriBridge = {
     if (isTauriRuntime()) {
       if (track.providerId === "soundcloud") {
         throw new Error("Blob playback is not available for SoundCloud tracks");
+      }
+
+      if (track.providerId === "lmusic") {
+        return invoke<TrackBlobResult>("get_lmusic_track_blob", { audioUrl: track.audioUrl });
       }
 
       return invoke<TrackBlobResult>("get_hitmos_track_blob", { audioUrl: track.audioUrl });

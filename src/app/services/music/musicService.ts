@@ -4,11 +4,12 @@ import {
   extractPrimaryArtistName,
   normalizationService,
 } from "../normalizationService";
+import { searchCanonicalizationOrchestrator } from "../searchCanonicalizationOrchestrator";
 import { discoveryService } from "./discoveryService";
 import { searchService } from "./searchService";
 
 const DISCOVERY_PROVIDER_ID = "hitmos" as const;
-const SEARCH_PROVIDER_IDS: ProviderId[] = ["hitmos", "soundcloud"];
+const SEARCH_PROVIDER_IDS: ProviderId[] = ["hitmos", "lmusic", "soundcloud"];
 const INITIAL_METADATA_PREFETCH_LIMIT = 4;
 const SEARCH_METADATA_PREFETCH_LIMIT = 6;
 const ARTIST_METADATA_PREFETCH_LIMIT = 8;
@@ -42,6 +43,16 @@ class MusicService {
   private activeArtistPreloads = new Map<string, Promise<Track[]>>();
   private queuedMetadataTrackIds = new Set<string>();
   private latestSearchRequestId = 0;
+
+  private createSearchSetId(query: string) {
+    const normalizedQuery = normalizationService.normalizeTrackTitle(query || "");
+
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return `search:${normalizedQuery}:${crypto.randomUUID()}`;
+    }
+
+    return `search:${normalizedQuery}:${Date.now()}`;
+  }
 
   private deferMetadataPrefetch(trackIds: string[], limit: number) {
     const queuedTrackIds = trackIds
@@ -183,6 +194,7 @@ class MusicService {
 
     if (!trimmedQuery) {
       await this.loadPopularTracks();
+      searchCanonicalizationOrchestrator.clearProjection();
 
       if (requestId === this.latestSearchRequestId) {
         useAppStore
@@ -201,12 +213,18 @@ class MusicService {
         return tracks;
       }
 
+      const searchSetId = this.createSearchSetId(trimmedQuery);
+
       useAppStore.getState().setSearchState({
         query,
         trackIds: tracks.map((track) => track.id),
         status: tracks.length ? "success" : "empty",
         error: null,
       });
+      searchCanonicalizationOrchestrator.hydrateSearchResults(
+        searchSetId,
+        tracks.map((track) => track.id),
+      );
 
       this.deferMetadataPrefetch(
         tracks.map((track) => track.id),
@@ -224,6 +242,7 @@ class MusicService {
       useAppStore
         .getState()
         .setSearchState({ query, trackIds: [], status: "error", error: message });
+      searchCanonicalizationOrchestrator.clearProjection();
 
       return [];
     }
