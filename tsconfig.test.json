@@ -8,6 +8,7 @@
     "moduleResolution": "Node"
   },
   "include": [
+    "src/recommendation/**/*.ts",
     "src/app/services/normalizationService.ts",
     "src/app/services/trackCanonicalizationService.ts",
     "src/app/services/canonicalLyricsPolicy.ts",

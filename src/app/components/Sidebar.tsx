@@ -1,9 +1,9 @@
-import { Heart, History, House, ListMusic, LogIn, LogOut, UserPlus } from "lucide-react";
+import { Heart, History, House, ListMusic, LogIn, LogOut, Radio, UserPlus } from "lucide-react";
 import { AuthUser, RouteId } from "../types";
 import { getUserDisplayName } from "../services/userService";
 import { BrandMark } from "./BrandMark";
 
-type PrimaryRoute = "home" | "history" | "favorites" | "playlists";
+type PrimaryRoute = "home" | "stream" | "history" | "favorites" | "playlists";
 
 interface SidebarProps {
   activePage: RouteId;
@@ -31,8 +31,9 @@ export function Sidebar({
     hint: string;
   }> = [
     { id: "home", label: "Главная", icon: House, hint: "Популярное и подборки" },
+    { id: "stream", label: "Поток", icon: Radio, hint: "Бесконечные рекомендации" },
     { id: "history", label: "История", icon: History, hint: "Прослушанные треки" },
-    { id: "favorites", label: "Избранное", icon: Heart, hint: "Автозагрузка и сохраненное" },
+    { id: "favorites", label: "Избранное", icon: Heart, hint: "Автозагрузка и сохранённое" },
     { id: "playlists", label: "Плейлисты", icon: ListMusic, hint: "Ваши подборки" },
   ];
 

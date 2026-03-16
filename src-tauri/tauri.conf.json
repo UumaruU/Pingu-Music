@@ -4,9 +4,9 @@
   "version": "0.1.22",
   "identifier": "com.pingu.music",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "node scripts/tauri-dev-server.mjs",
     "beforeBuildCommand": "npm run build",
-    "devUrl": "http://localhost:5173",
+    "devUrl": "http://127.0.0.1:5173",
     "frontendDist": "../dist"
   },
   "bundle": {

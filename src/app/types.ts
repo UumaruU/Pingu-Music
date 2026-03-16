@@ -1,5 +1,6 @@
 export type RouteId =
   | "home"
+  | "stream"
   | "history"
   | "favorites"
   | "playlists"

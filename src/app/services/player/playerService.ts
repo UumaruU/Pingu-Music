@@ -1,4 +1,5 @@
 import { useAppStore } from "../../store/appStore";
+import { recommendationFacade } from "../../integrations/recommendation/recommendationFacade";
 import { clamp } from "../../utils/format";
 import { shuffleArray } from "../../utils/shuffle";
 import { PlayerStreamService, PreparedTrackSource } from "./playerStreamService";
@@ -11,6 +12,8 @@ class PlayerService {
   private runtimeBlobUrl: string | null = null;
   private historyTrackId: string | null = null;
   private historySavedForCurrentTrack = false;
+  private affinityTrackId: string | null = null;
+  private affinitySavedForCurrentTrack = false;
   private pendingSeekSeconds: number | null = null;
   private preparedTrackSource: PreparedTrackSource | null = null;
   private preloadRequestId = 0;
@@ -63,7 +66,8 @@ class PlayerService {
 
     this.audio.addEventListener("ended", () => {
       this.trySaveListenHistory(true);
-      this.handleEnded();
+      this.capturePlaybackAffinityForCurrentTrack(true);
+      void this.handleEnded();
     });
 
     this.audio.addEventListener("error", () => {
@@ -87,6 +91,8 @@ class PlayerService {
 
     this.historyTrackId = trackId;
     this.historySavedForCurrentTrack = false;
+    this.affinityTrackId = trackId;
+    this.affinitySavedForCurrentTrack = false;
   }
 
   private trySaveListenHistory(force = false) {
@@ -117,6 +123,41 @@ class PlayerService {
       this.getState().addListenHistory(currentTrack.id);
       this.historySavedForCurrentTrack = true;
     }
+  }
+
+  private capturePlaybackAffinityForCurrentTrack(endedNaturally: boolean) {
+    const currentTrack = this.getCurrentTrack();
+
+    if (!currentTrack) {
+      return;
+    }
+
+    this.syncHistoryTrackingTrack(currentTrack.id);
+
+    if (this.affinitySavedForCurrentTrack && this.affinityTrackId === currentTrack.id) {
+      return;
+    }
+
+    const durationSeconds =
+      Number.isFinite(this.audio.duration) && this.audio.duration > 0
+        ? this.audio.duration
+        : currentTrack.duration;
+
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+      return;
+    }
+
+    const listenedMs = Math.max(0, Math.round(this.audio.currentTime * 1000));
+    const trackDurationMs = Math.max(0, Math.round(durationSeconds * 1000));
+
+    void recommendationFacade.updatePlaybackAffinityForVariantTrack(currentTrack.id, {
+      listenedMs,
+      trackDurationMs,
+      endedNaturally,
+      wasSkipped: !endedNaturally,
+    });
+
+    this.affinitySavedForCurrentTrack = true;
   }
 
   private async playSource(source: string, duration: number, restart: boolean) {
@@ -246,6 +287,9 @@ class PlayerService {
 
   playTrack(trackId: string, queueIds: string[]) {
     this.initialize();
+    if (this.getState().currentTrackId && this.getState().currentTrackId !== trackId) {
+      this.capturePlaybackAffinityForCurrentTrack(false);
+    }
     const nextQueue = queueIds.length ? queueIds : [trackId];
     this.preloadRequestId += 1;
     this.releasePreparedTrackSource();
@@ -316,6 +360,10 @@ class PlayerService {
       return;
     }
 
+    if (state.currentTrackId && state.currentTrackId !== trackId) {
+      this.capturePlaybackAffinityForCurrentTrack(false);
+    }
+
     state.setCurrentTrackIndex(index);
     void this.syncAndPlay(trackId, true);
   }
@@ -383,7 +431,7 @@ class PlayerService {
     this.getState().setRepeatMode(next);
   }
 
-  handleEnded() {
+  async handleEnded() {
     const state = this.getState();
 
     if (state.playerSettings.repeatMode === "one" && state.currentTrackId) {
@@ -394,6 +442,13 @@ class PlayerService {
     const isLastTrack = state.currentTrackIndex >= state.currentQueue.length - 1;
 
     if (isLastTrack && state.playerSettings.repeatMode === "off") {
+      const recommendation = await recommendationFacade.getNextRecommendedTrack();
+
+      if (recommendation?.preferredVariantId) {
+        this.playTrack(recommendation.preferredVariantId, [recommendation.preferredVariantId]);
+        return;
+      }
+
       state.setPlaybackState(false);
       return;
     }

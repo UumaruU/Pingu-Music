@@ -31,6 +31,7 @@ function parseRoute(hash: string): RouteState {
   if (
     segments[0] === "favorites" ||
     segments[0] === "playlists" ||
+    segments[0] === "stream" ||
     segments[0] === "search" ||
     segments[0] === "history" ||
     segments[0] === "login" ||

@@ -1,4 +1,5 @@
 "use strict";
+// Frontend adapter: app-layer keeps historical source weights while recommendation domain has its own richer registry.
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getSourcePriority = getSourcePriority;
 exports.getSourceTrustScore = getSourceTrustScore;

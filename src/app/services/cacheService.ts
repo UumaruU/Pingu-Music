@@ -1,7 +1,7 @@
 import { LazyStore } from "@tauri-apps/plugin-store";
 import { tauriBridge } from "./tauriBridge";
 
-type CacheSection = "tracks" | "artists" | "releases" | "lyrics" | "artwork";
+type CacheSection = "tracks" | "artists" | "releases" | "lyrics" | "artwork" | "recommendation";
 
 interface CacheEnvelope<T> {
   payload: T;

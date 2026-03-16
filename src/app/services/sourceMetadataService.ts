@@ -1,3 +1,5 @@
+// Frontend adapter: app-layer keeps historical source weights while recommendation domain has its own richer registry.
+
 import { canonicalizationConfig } from "../config/canonicalizationConfig";
 import { ProviderId, Track } from "../types";
 

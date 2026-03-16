@@ -173,6 +173,7 @@ interface AppState {
   addTrackToPlaylist: (playlistId: string, trackId: string) => void;
   removeTrackFromPlaylist: (playlistId: string, trackId: string) => void;
   setQueue: (queueIds: string[], startTrackId: string, originalQueueIds?: string[]) => void;
+  syncQueue: (queueIds: string[], originalQueueIds?: string[]) => void;
   setCurrentTrackIndex: (index: number) => void;
   setPlaybackState: (isPlaying: boolean) => void;
   setProgress: (progress: number) => void;
@@ -781,6 +782,21 @@ export const useAppStore = create<AppState>()(
           currentTrackIndex,
           currentTrackId: startTrackId,
           progress: 0,
+        });
+      },
+      syncQueue: (queueIds, originalQueueIds) => {
+        set((state) => {
+          const currentTrackIndex = state.currentTrackId
+            ? queueIds.findIndex((trackId) => trackId === state.currentTrackId)
+            : -1;
+
+          return {
+            currentQueue: queueIds,
+            originalQueue: originalQueueIds ?? queueIds,
+            currentTrackIndex,
+            currentTrackId:
+              currentTrackIndex >= 0 ? state.currentTrackId : queueIds[0] ?? state.currentTrackId,
+          };
         });
       },
       setCurrentTrackIndex: (index) => {

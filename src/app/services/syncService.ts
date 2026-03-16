@@ -1,8 +1,9 @@
 import { ApiClientError, ApiRequestOptions, apiClient } from "./apiClient";
 import { downloadService } from "./downloadService";
+import { serverTrackCatalogService } from "./serverTrackCatalogService";
 import { withTrackProviderDefaults } from "../core/tracks/trackIdentity";
 import { useAppStore } from "../store/appStore";
-import { ListenHistoryEntry, PlayerSettings, Playlist, RepeatMode, SyncStatus, Track } from "../types";
+import { ListenHistoryEntry, RecentSearch, SyncStatus, Track } from "../types";
 
 interface SyncResult {
   status: SyncStatus;
@@ -17,19 +18,10 @@ interface FavoritesSyncState {
 
 const FAVORITES_PULL_ENDPOINTS = ["/sync/favorites"];
 const FAVORITES_PUSH_ENDPOINTS = ["/sync/favorites"];
-const PLAYLISTS_PULL_ENDPOINTS = ["/sync/playlists"];
-const PLAYLISTS_PUSH_ENDPOINTS = ["/sync/playlists"];
-const SETTINGS_PULL_ENDPOINTS = ["/sync/settings"];
-const SETTINGS_PUSH_ENDPOINTS = ["/sync/settings"];
 const HISTORY_PULL_ENDPOINTS = ["/sync/history"];
 const HISTORY_PUSH_ENDPOINTS = ["/sync/history"];
-
-const DEFAULT_PLAYER_SETTINGS: PlayerSettings = {
-  volume: 0.75,
-  muted: false,
-  repeatMode: "off",
-  shuffleEnabled: false,
-};
+const SEARCH_HISTORY_PULL_ENDPOINTS = ["/sync/search-history"];
+const SEARCH_HISTORY_PUSH_ENDPOINTS = ["/sync/search-history"];
 
 let realtimeSyncInitialized = false;
 let realtimeSyncEnabled = false;
@@ -41,30 +33,17 @@ const queuedSyncState = {
     inFlight: null as Promise<void> | null,
     retryTimer: null as ReturnType<typeof setTimeout> | null,
   },
-  playlists: {
-    pending: null as Playlist[] | null,
-    inFlight: null as Promise<void> | null,
-    retryTimer: null as ReturnType<typeof setTimeout> | null,
-  },
-  settings: {
-    pending: null as Partial<PlayerSettings> | null,
-    inFlight: null as Promise<void> | null,
-    retryTimer: null as ReturnType<typeof setTimeout> | null,
-  },
   history: {
     pending: null as ListenHistoryEntry[] | null,
     inFlight: null as Promise<void> | null,
     retryTimer: null as ReturnType<typeof setTimeout> | null,
   },
+  searchHistory: {
+    pending: null as RecentSearch[] | null,
+    inFlight: null as Promise<void> | null,
+    retryTimer: null as ReturnType<typeof setTimeout> | null,
+  },
 };
-
-function dedupeTrackIds(trackIds: string[] | undefined) {
-  if (!Array.isArray(trackIds)) {
-    return [];
-  }
-
-  return [...new Set(trackIds.filter((trackId) => typeof trackId === "string" && trackId.trim()))];
-}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object") {
@@ -91,10 +70,6 @@ function extractArrayPayload(payload: unknown) {
 
   if (Array.isArray(record.data)) {
     return record.data;
-  }
-
-  if (Array.isArray(record.playlists)) {
-    return record.playlists;
   }
 
   if (Array.isArray(record.favorites)) {
@@ -128,7 +103,8 @@ function normalizeFavoriteTracks(payload: unknown): Track[] {
   const record = asRecord(payload);
   const rawTracks = Array.isArray(record?.tracks) ? record.tracks : [];
 
-  const normalizedTracks: Array<Track | null> = rawTracks.map((item) => {
+  return rawTracks
+    .map((item) => {
       const track = asRecord(item);
       if (!track) {
         return null;
@@ -145,10 +121,21 @@ function normalizeFavoriteTracks(payload: unknown): Track[] {
         return null;
       }
 
-      return {
+      return withTrackProviderDefaults({
         id,
-        providerId: "hitmos",
-        providerTrackId: id,
+        providerId:
+          track.providerId === "hitmos" ||
+          track.providerId === "lmusic" ||
+          track.providerId === "soundcloud" ||
+          track.providerId === "telegram"
+            ? track.providerId
+            : "hitmos",
+        providerTrackId:
+          typeof track.providerTrackId === "string" && track.providerTrackId.trim()
+            ? track.providerTrackId.trim()
+            : id.includes(":")
+              ? id.slice(id.indexOf(":") + 1)
+              : id,
         title,
         artist,
         coverUrl:
@@ -166,7 +153,12 @@ function normalizeFavoriteTracks(payload: unknown): Track[] {
             : "https://rus.hitmotop.com",
         isFavorite: true,
         downloadState: "idle",
-        metadataStatus: "raw",
+        metadataStatus:
+          track.metadataStatus === "matching" ||
+          track.metadataStatus === "matched" ||
+          track.metadataStatus === "enriched"
+            ? track.metadataStatus
+            : "raw",
         albumTitle:
           typeof track.albumTitle === "string" && track.albumTitle.trim()
             ? track.albumTitle.trim()
@@ -183,75 +175,9 @@ function normalizeFavoriteTracks(payload: unknown): Track[] {
           typeof track.musicBrainzReleaseId === "string" && track.musicBrainzReleaseId.trim()
             ? track.musicBrainzReleaseId.trim()
             : undefined,
-      } satisfies Track;
-    });
-
-  return normalizedTracks
-    .filter((track): track is Track => !!track)
-    .map((track) => withTrackProviderDefaults(track));
-}
-
-function normalizePlaylists(payload: unknown) {
-  const now = new Date().toISOString();
-
-  return extractArrayPayload(payload)
-    .map((item) => {
-      const record = asRecord(item);
-      if (!record) {
-        return null;
-      }
-
-      const name = typeof record.name === "string" ? record.name.trim() : "";
-      if (!name) {
-        return null;
-      }
-
-      const id = typeof record.id === "string" && record.id.trim()
-        ? record.id.trim()
-        : crypto.randomUUID();
-
-      return {
-        id,
-        name,
-        trackIds: dedupeTrackIds(
-          Array.isArray(record.trackIds) ? (record.trackIds as string[]) : [],
-        ),
-        createdAt:
-          typeof record.createdAt === "string" && record.createdAt.trim()
-            ? record.createdAt
-            : now,
-      } satisfies Playlist;
+      } satisfies Track);
     })
-    .filter((playlist): playlist is Playlist => !!playlist);
-}
-
-function normalizeSettings(payload: unknown): Partial<PlayerSettings> {
-  const source = asRecord(payload)?.settings ?? payload;
-  const record = asRecord(source);
-
-  if (!record) {
-    return {};
-  }
-
-  const nextSettings: Partial<PlayerSettings> = {};
-  if (typeof record.volume === "number" && Number.isFinite(record.volume)) {
-    nextSettings.volume = Math.max(0, Math.min(1, record.volume));
-  }
-  if (typeof record.muted === "boolean") {
-    nextSettings.muted = record.muted;
-  }
-  if (
-    record.repeatMode === "off" ||
-    record.repeatMode === "one" ||
-    record.repeatMode === "all"
-  ) {
-    nextSettings.repeatMode = record.repeatMode as RepeatMode;
-  }
-  if (typeof record.shuffleEnabled === "boolean") {
-    nextSettings.shuffleEnabled = record.shuffleEnabled;
-  }
-
-  return nextSettings;
+    .filter((track): track is Track => !!track);
 }
 
 function normalizeHistory(payload: unknown): ListenHistoryEntry[] {
@@ -274,12 +200,13 @@ function normalizeHistory(payload: unknown): ListenHistoryEntry[] {
         return null;
       }
 
-      const id = typeof record.id === "string" && record.id.trim()
-        ? record.id.trim()
-        : `${trackId}:${dayKey}`;
+      const id =
+        typeof record.id === "string" && record.id.trim()
+          ? record.id.trim()
+          : `${trackId}:${dayKey}`;
 
       return {
-        id: `${trackId}:${dayKey}`,
+        id,
         trackId,
         listenedAt,
         dayKey,
@@ -300,6 +227,111 @@ function normalizeHistory(payload: unknown): ListenHistoryEntry[] {
   return [...deduped.values()].sort(
     (left, right) => Date.parse(right.listenedAt) - Date.parse(left.listenedAt),
   );
+}
+
+function normalizeRecentSearches(payload: unknown): RecentSearch[] {
+  const normalized = extractArrayPayload(payload)
+    .map((item) => {
+      const record = asRecord(item);
+      if (!record) {
+        return null;
+      }
+
+      const query = typeof record.query === "string" ? record.query.trim() : "";
+      if (!query) {
+        return null;
+      }
+
+      const createdAt =
+        typeof record.createdAt === "string" && !Number.isNaN(Date.parse(record.createdAt))
+          ? new Date(record.createdAt).toISOString()
+          : new Date().toISOString();
+      const id =
+        typeof record.id === "string" && record.id.trim()
+          ? record.id.trim()
+          : `${query}:${createdAt}`;
+
+      return {
+        id,
+        query,
+        createdAt,
+      } satisfies RecentSearch;
+    })
+    .filter((entry): entry is RecentSearch => !!entry);
+
+  const deduped = new Map<string, RecentSearch>();
+
+  normalized.forEach((entry) => {
+    const key = entry.query.toLowerCase();
+    const existing = deduped.get(key);
+
+    if (!existing || Date.parse(entry.createdAt) > Date.parse(existing.createdAt)) {
+      deduped.set(key, entry);
+    }
+  });
+
+  return [...deduped.values()]
+    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+    .slice(0, 8);
+}
+
+function mergeRecentSearches(...groups: RecentSearch[][]) {
+  return normalizeRecentSearches(
+    groups.flatMap((entries) =>
+      entries.map((entry) => ({
+        id: entry.id,
+        query: entry.query,
+        createdAt: entry.createdAt,
+      })),
+    ),
+  );
+}
+
+function updateTrackFavorites(favoriteIds: string[]) {
+  const favoriteSet = new Set(favoriteIds);
+  const state = useAppStore.getState();
+  const nextTracks = Object.fromEntries(
+    Object.entries(state.tracks).map(([trackId, track]) => [
+      trackId,
+      {
+        ...track,
+        isFavorite: favoriteSet.has(trackId),
+      },
+    ]),
+  );
+  const nextDownloadedTracks = Object.fromEntries(
+    Object.entries(state.downloadedTracks).map(([trackId, track]) => [
+      trackId,
+      {
+        ...track,
+        isFavorite: favoriteSet.has(trackId),
+      },
+    ]),
+  );
+
+  useAppStore.setState({ tracks: nextTracks, downloadedTracks: nextDownloadedTracks });
+}
+
+function getKnownTracksByIds(trackIds: string[]) {
+  const state = useAppStore.getState();
+  const trackMap = {
+    ...state.tracks,
+    ...state.downloadedTracks,
+  };
+
+  return [...new Set(trackIds.filter(Boolean))]
+    .map((trackId) => trackMap[trackId])
+    .filter((track): track is Track => !!track);
+}
+
+async function ensureTracksSyncedForIds(trackIds: string[]) {
+  const tracks = getKnownTracksByIds(trackIds);
+
+  if (!tracks.length) {
+    return;
+  }
+
+  await serverTrackCatalogService.syncTracks(tracks);
 }
 
 async function requestOptional<T>(endpoints: string[], options: ApiRequestOptions = {}) {
@@ -340,31 +372,6 @@ async function writeOptional(
       throw error;
     }
   }
-}
-
-function updateTrackFavorites(favoriteIds: string[]) {
-  const favoriteSet = new Set(favoriteIds);
-  const state = useAppStore.getState();
-  const nextTracks = Object.fromEntries(
-    Object.entries(state.tracks).map(([trackId, track]) => [
-      trackId,
-      {
-        ...track,
-        isFavorite: favoriteSet.has(trackId),
-      },
-    ]),
-  );
-  const nextDownloadedTracks = Object.fromEntries(
-    Object.entries(state.downloadedTracks).map(([trackId, track]) => [
-      trackId,
-      {
-        ...track,
-        isFavorite: favoriteSet.has(trackId),
-      },
-    ]),
-  );
-
-  useAppStore.setState({ tracks: nextTracks, downloadedTracks: nextDownloadedTracks });
 }
 
 async function runQueuedSync<T>(
@@ -467,88 +474,30 @@ export const syncService = {
     realtimeSyncInitialized = true;
 
     let previousFavorites = useAppStore.getState().favorites;
-    let previousPlaylists = useAppStore.getState().playlists;
-    let previousSettings = useAppStore.getState().playerSettings;
     let previousHistory = useAppStore.getState().listenHistory;
+    let previousRecentSearches = useAppStore.getState().recentSearches;
 
     useAppStore.subscribe((state) => {
-      const { favorites, playlists, playerSettings, listenHistory } = state;
+      const { favorites, listenHistory, recentSearches } = state;
 
       if (realtimeSyncEnabled && suppressedRealtimeSyncDepth === 0) {
         if (favorites !== previousFavorites) {
           void this.queueFavoritesPush(favorites);
         }
 
-        if (playlists !== previousPlaylists) {
-          void this.queuePlaylistsPush(playlists);
-        }
-
-        if (playerSettings !== previousSettings) {
-          void this.queueSettingsPush(playerSettings);
-        }
-
         if (listenHistory !== previousHistory) {
           void this.queueHistoryPush(listenHistory);
+        }
+
+        if (recentSearches !== previousRecentSearches) {
+          void this.queueSearchHistoryPush(recentSearches);
         }
       }
 
       previousFavorites = favorites;
-      previousPlaylists = playlists;
-      previousSettings = playerSettings;
       previousHistory = listenHistory;
+      previousRecentSearches = recentSearches;
     });
-  },
-
-  async pullHistory() {
-    const payload = await requestOptional<unknown>(HISTORY_PULL_ENDPOINTS, {
-      auth: true,
-    });
-    return normalizeHistory(payload);
-  },
-
-  async pushHistory(historyPayload: ListenHistoryEntry[]) {
-    await writeOptional(HISTORY_PUSH_ENDPOINTS, {
-      method: "PUT",
-      body: { entries: historyPayload },
-      keepalive: true,
-      parseAs: "void",
-    });
-  },
-
-  async syncAfterLogin() {
-    const [remoteFavoritesState, remotePlaylists, remoteSettings, remoteHistory] = await Promise.all([
-      this.pullFavorites(),
-      this.pullPlaylists(),
-      this.pullSettings(),
-      this.pullHistory(),
-    ]);
-    const remoteFavorites = remoteFavoritesState.favoriteIds;
-
-    const nextSettings: PlayerSettings = {
-      ...DEFAULT_PLAYER_SETTINGS,
-      ...remoteSettings,
-    };
-
-    await withRealtimeSyncSuppressed(() => {
-      useAppStore.setState({
-        favorites: remoteFavorites,
-        playlists: remotePlaylists,
-        playerSettings: nextSettings,
-        listenHistory: remoteHistory,
-      });
-      if (remoteFavoritesState.tracks.length) {
-        useAppStore.getState().hydrateCatalog(remoteFavoritesState.tracks);
-      }
-      updateTrackFavorites(remoteFavorites);
-    });
-    await downloadService.restoreMissingFavoriteDownloads(remoteFavorites);
-    this.enableRealtimeSync();
-
-    return {
-      status: "synced",
-      merged: false,
-      conflictNames: [],
-    } satisfies SyncResult;
   },
 
   async pullFavorites() {
@@ -563,6 +512,7 @@ export const syncService = {
   },
 
   async pushFavorites(favorites: string[]) {
+    await ensureTracksSyncedForIds(favorites);
     await writeOptional(FAVORITES_PUSH_ENDPOINTS, {
       method: "PUT",
       body: { trackIds: favorites },
@@ -571,38 +521,90 @@ export const syncService = {
     });
   },
 
-  async pullPlaylists() {
-    const payload = await requestOptional<unknown>(PLAYLISTS_PULL_ENDPOINTS, {
+  async pullHistory() {
+    const payload = await requestOptional<unknown>(HISTORY_PULL_ENDPOINTS, {
       auth: true,
     });
 
-    return normalizePlaylists(payload);
+    return normalizeHistory(payload);
   },
 
-  async pushPlaylists(playlists: Playlist[]) {
-    await writeOptional(PLAYLISTS_PUSH_ENDPOINTS, {
+  async pushHistory(historyPayload: ListenHistoryEntry[]) {
+    await ensureTracksSyncedForIds(historyPayload.map((entry) => entry.trackId));
+    await writeOptional(HISTORY_PUSH_ENDPOINTS, {
       method: "PUT",
-      body: { playlists },
+      body: { entries: historyPayload },
       keepalive: true,
       parseAs: "void",
     });
   },
 
-  async pullSettings() {
-    const payload = await requestOptional<unknown>(SETTINGS_PULL_ENDPOINTS, {
+  async pullSearchHistory() {
+    const payload = await requestOptional<unknown>(SEARCH_HISTORY_PULL_ENDPOINTS, {
       auth: true,
     });
 
-    return normalizeSettings(payload);
+    return normalizeRecentSearches(payload);
   },
 
-  async pushSettings(settings: Partial<PlayerSettings>) {
-    await writeOptional(SETTINGS_PUSH_ENDPOINTS, {
+  async pushSearchHistory(searchHistory: RecentSearch[]) {
+    await writeOptional(SEARCH_HISTORY_PUSH_ENDPOINTS, {
       method: "PUT",
-      body: { settings },
+      body: {
+        items: searchHistory.map((entry) => ({
+          id: entry.id,
+          query: entry.query,
+          createdAt: entry.createdAt,
+        })),
+      },
       keepalive: true,
       parseAs: "void",
     });
+  },
+
+  async syncAfterLogin() {
+    const localState = useAppStore.getState();
+    const [remoteFavoritesState, remoteHistory, remoteSearchHistory] = await Promise.all([
+      this.pullFavorites(),
+      this.pullHistory(),
+      this.pullSearchHistory(),
+    ]);
+    const mergedFavorites = [...new Set([...localState.favorites, ...remoteFavoritesState.favoriteIds])];
+    const mergedHistory = normalizeHistory([...localState.listenHistory, ...remoteHistory]);
+    const mergedSearchHistory = mergeRecentSearches(localState.recentSearches, remoteSearchHistory);
+
+    await ensureTracksSyncedForIds([
+      ...mergedFavorites,
+      ...mergedHistory.map((entry) => entry.trackId),
+    ]);
+    await Promise.all([
+      this.pushFavorites(mergedFavorites),
+      this.pushHistory(mergedHistory),
+      this.pushSearchHistory(mergedSearchHistory),
+    ]);
+
+    await withRealtimeSyncSuppressed(() => {
+      useAppStore.setState({
+        favorites: mergedFavorites,
+        listenHistory: mergedHistory,
+        recentSearches: mergedSearchHistory,
+      });
+
+      if (remoteFavoritesState.tracks.length) {
+        useAppStore.getState().hydrateCatalog(remoteFavoritesState.tracks);
+      }
+
+      updateTrackFavorites(mergedFavorites);
+    });
+
+    await downloadService.restoreMissingFavoriteDownloads(mergedFavorites);
+    this.enableRealtimeSync();
+
+    return {
+      status: "synced",
+      merged: true,
+      conflictNames: [],
+    } satisfies SyncResult;
   },
 
   queueFavoritesPush(favorites: string[]) {
@@ -614,33 +616,21 @@ export const syncService = {
     );
   },
 
-  queuePlaylistsPush(playlists: Playlist[]) {
-    queuedSyncState.playlists.pending = playlists.map((playlist) => ({
-      ...playlist,
-      trackIds: [...playlist.trackIds],
-    }));
-    return runQueuedSync(
-      queuedSyncState.playlists,
-      (snapshot) => this.pushPlaylists(snapshot),
-      "playlists",
-    );
-  },
-
-  queueSettingsPush(settings: Partial<PlayerSettings>) {
-    queuedSyncState.settings.pending = { ...settings };
-    return runQueuedSync(
-      queuedSyncState.settings,
-      (snapshot) => this.pushSettings(snapshot),
-      "settings",
-    );
-  },
-
   queueHistoryPush(history: ListenHistoryEntry[]) {
     queuedSyncState.history.pending = history.map((entry) => ({ ...entry }));
     return runQueuedSync(
       queuedSyncState.history,
       (snapshot) => this.pushHistory(snapshot),
       "history",
+    );
+  },
+
+  queueSearchHistoryPush(searchHistory: RecentSearch[]) {
+    queuedSyncState.searchHistory.pending = searchHistory.map((entry) => ({ ...entry }));
+    return runQueuedSync(
+      queuedSyncState.searchHistory,
+      (snapshot) => this.pushSearchHistory(snapshot),
+      "search-history",
     );
   },
 };

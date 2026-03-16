@@ -11,6 +11,7 @@ import { canonicalizationConfig } from "./config/canonicalizationConfig";
 import { useDebouncedValue } from "./hooks/useDebouncedValue";
 import { useHashRoute } from "./hooks/useHashRoute";
 import { HomePage } from "./pages/HomePage";
+import { StreamPage } from "./pages/StreamPage";
 import { downloadService } from "./services/downloadService";
 import { trackCanonicalizationService } from "./services/trackCanonicalizationService";
 import { useAppStore } from "./store/appStore";
@@ -460,7 +461,7 @@ export default function App() {
   }, [cleanupListenHistory]);
 
   useEffect(() => {
-    if (route.page !== "home") {
+    if (route.page !== "home" && route.page !== "stream") {
       return;
     }
 
@@ -721,6 +722,11 @@ export default function App() {
   };
 
   const handleRouteChange = (page: RouteId) => {
+    if (page === "stream" && !authState.isAuthenticated) {
+      navigate({ page: "login" });
+      return;
+    }
+
     navigate({ page });
   };
 
@@ -733,11 +739,16 @@ export default function App() {
   };
 
   const handleSearchSubmit = () => {
+    if (searchValue.trim()) {
+      addRecentSearch(searchValue);
+    }
+
     navigate({ page: "search" });
     void loadMusicService().then((musicService) => musicService.searchTracks(searchValue));
   };
 
   const handleSelectRecentQuery = (query: string) => {
+    addRecentSearch(query);
     setSearchValue(query);
     navigate({ page: "search" });
     void loadMusicService().then((musicService) => musicService.searchTracks(query));
@@ -795,6 +806,10 @@ export default function App() {
 
     if (route.page === "favorites") {
       return <FavoritesPage tracks={favoriteTracks} {...pageActions} />;
+    }
+
+    if (route.page === "stream") {
+      return <StreamPage {...pageActions} onOpenLogin={() => navigate({ page: "login" })} />;
     }
 
     if (route.page === "history") {
@@ -889,7 +904,16 @@ export default function App() {
       );
     }
 
-    return <HomePage tracks={popularTracks} {...pageActions} />;
+    return (
+      <HomePage
+        tracks={popularTracks}
+        onOpenStream={() =>
+          navigate({ page: authState.isAuthenticated ? "stream" : "login" })
+        }
+        onOpenLogin={() => navigate({ page: "login" })}
+        {...pageActions}
+      />
+    );
   };
 
   return (
