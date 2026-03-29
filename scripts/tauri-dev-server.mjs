@@ -1,7 +1,11 @@
 import { spawn } from "node:child_process";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const devUrl = process.env.TAURI_DEV_URL ?? "http://127.0.0.1:5173";
 const viteMarkers = ["/@vite/client", "__vite_plugin_react_preamble_installed__", "<div id=\"root\"></div>"];
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const projectRoot = resolve(scriptDir, "..");
 
 async function hasCompatibleDevServer() {
   try {
@@ -25,11 +29,18 @@ if (await hasCompatibleDevServer()) {
   process.exit(0);
 }
 
-const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-const child = spawn(npmCommand, ["run", "dev"], {
-  stdio: "inherit",
-  env: process.env,
-});
+const child =
+  process.platform === "win32"
+    ? spawn("cmd.exe", ["/d", "/s", "/c", "npm run dev"], {
+        stdio: "inherit",
+        env: process.env,
+        cwd: projectRoot,
+      })
+    : spawn("npm", ["run", "dev"], {
+        stdio: "inherit",
+        env: process.env,
+        cwd: projectRoot,
+      });
 
 child.on("error", (error) => {
   console.error("[tauri-dev] failed to start frontend dev server");
