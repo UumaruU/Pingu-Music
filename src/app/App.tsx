@@ -461,11 +461,13 @@ export default function App() {
   }, [cleanupListenHistory]);
 
   useEffect(() => {
-    if (route.page !== "home" && route.page !== "stream") {
+    if (route.page !== "home") {
       return;
     }
 
-    void loadMusicService().then((musicService) => musicService.loadPopularTracks());
+    void loadMusicService()
+      .then((musicService) => musicService.loadPopularTracks())
+      .catch(() => undefined);
   }, [route.page]);
 
   useEffect(() => {

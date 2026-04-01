@@ -13,6 +13,7 @@
     "src/app/services/trackCanonicalizationService.ts",
     "src/app/services/canonicalLyricsPolicy.ts",
     "src/app/services/sourceMetadataService.ts",
+    "src/app/pages/**/*.ts",
     "src/app/config/**/*.ts",
     "src/app/types.ts",
     "tests/**/*.ts"

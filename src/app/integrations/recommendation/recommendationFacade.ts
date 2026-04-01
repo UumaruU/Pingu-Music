@@ -35,6 +35,11 @@ export interface FrontendRecommendedTrack {
 }
 
 export interface FrontendRecommendationBatch {
+  requestId?: string;
+  strategy?: string;
+  contextSummary?: string;
+  queueMode?: "single-next" | "batch";
+  visibleQueueLength?: number;
   seed: {
     mode: RecommendationMode;
     canonicalTrackId?: string;
@@ -48,6 +53,9 @@ interface RecommendationStreamBatchOptions {
   mode?: RecommendationMode;
   seedVariantTrackId?: string | null;
   seedCanonicalTrackId?: string | null;
+  currentTrackId?: string | null;
+  excludeTrackIds?: string[];
+  recentRecommendationTrackIds?: string[];
   excludeCanonicalTrackIds?: string[];
   recentRecommendationIds?: string[];
 }
@@ -157,9 +165,10 @@ export const recommendationFacade = {
         limit: options.limit ?? 12,
         mode: options.mode ?? "autoplay",
         seedTrackId: options.seedVariantTrackId ?? null,
-        currentTrackId: useAppStore.getState().currentTrackId,
-        excludeTrackIds: options.excludeCanonicalTrackIds ?? [],
-        recentRecommendationTrackIds: options.recentRecommendationIds ?? [],
+        currentTrackId: options.currentTrackId ?? useAppStore.getState().currentTrackId,
+        excludeTrackIds: options.excludeTrackIds ?? options.excludeCanonicalTrackIds ?? [],
+        recentRecommendationTrackIds:
+          options.recentRecommendationTrackIds ?? options.recentRecommendationIds ?? [],
       },
     });
 
@@ -197,9 +206,7 @@ export const recommendationFacade = {
         endedNaturally: payload.endedNaturally,
         wasSkipped: payload.wasSkipped,
         sessionId: currentSessionId,
-        seedChannels: payload.seedChannels?.length
-          ? payload.seedChannels
-          : ["sessionContinuation"],
+        seedChannels: payload.seedChannels?.length ? payload.seedChannels : undefined,
       },
     });
   },

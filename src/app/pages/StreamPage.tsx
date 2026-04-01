@@ -8,6 +8,7 @@ import { EmptyState } from "../components/EmptyState";
 import { TrackList } from "../components/TrackList";
 import { useAppStore } from "../store/appStore";
 import { useAuthStore } from "../store/authStore";
+import { buildWaveQueueIds, resolveStreamWavePlaybackAction } from "./streamWavePlayback";
 
 interface StreamPageProps {
   currentTrackId: string | null;
@@ -22,175 +23,130 @@ interface StreamPageProps {
 
 type StreamStatus = "idle" | "loading" | "ready" | "error";
 
-// Frontend adapter: owns the infinite recommendation stream UX while the scoring/business logic stays in the domain module.
+function areTrackIdsEqual(left: string[], right: string[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((trackId, index) => trackId === right[index]);
+}
+
+// Frontend adapter: keeps the stream UX in true wave mode with only the next playable recommendation visible.
 export function StreamPage(trackListProps: StreamPageProps) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const [status, setStatus] = useState<StreamStatus>("loading");
-  const [items, setItems] = useState<FrontendRecommendedTrack[]>([]);
-  const [seedLabel, setSeedLabel] = useState("вашему вкусу");
+  const [nextItem, setNextItem] = useState<FrontendRecommendedTrack | null>(null);
+  const [seedLabel, setSeedLabel] = useState("Вашей волне");
+  const [contextSummary, setContextSummary] = useState("Следующий трек подбирается по вашему вкусу.");
+  const [strategy, setStrategy] = useState("user-feed");
   const [error, setError] = useState<string | null>(null);
-  const [isLoadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
-  const [streamPlaybackStarted, setStreamPlaybackStarted] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
+  const [wavePlaybackStarted, setWavePlaybackStarted] = useState(false);
   const requestIdRef = useRef(0);
-  const observerTargetRef = useRef<HTMLDivElement | null>(null);
-  const itemsRef = useRef<FrontendRecommendedTrack[]>([]);
   const currentQueue = useAppStore((state) => state.currentQueue);
   const queueCurrentTrackId = useAppStore((state) => state.currentTrackId);
   const syncQueue = useAppStore((state) => state.syncQueue);
 
-  useEffect(() => {
-    itemsRef.current = items;
-  }, [items]);
+  const currentBasisTrackId = queueCurrentTrackId ?? trackListProps.currentTrackId;
+  const visibleTracks = useMemo(() => (nextItem ? [nextItem.track] : []), [nextItem]);
+  const desiredWaveQueueIds = useMemo(
+    () => buildWaveQueueIds(currentBasisTrackId, nextItem?.track.id ?? null),
+    [currentBasisTrackId, nextItem],
+  );
 
-  const streamTracks = useMemo(() => items.map((item) => item.track), [items]);
-  const streamQueueIds = useMemo(() => streamTracks.map((track) => track.id), [streamTracks]);
-
-  async function loadBatch(reset: boolean) {
+  async function loadWavePreview() {
     if (!isAuthenticated) {
-      setItems([]);
-      setSeedLabel("требуется вход");
+      setNextItem(null);
+      setSeedLabel("Требуется вход");
+      setContextSummary("Войдите, чтобы сервер подбирал персональную волну.");
+      setStrategy("user-feed");
       setStatus("idle");
       setError(null);
-      setHasMore(false);
       return;
     }
 
     const nextRequestId = requestIdRef.current + 1;
     requestIdRef.current = nextRequestId;
-
-    if (reset) {
-      setStatus("loading");
-      setError(null);
-      setHasMore(true);
-    } else {
-      setLoadingMore(true);
-    }
-
-    const knownItems = reset ? [] : itemsRef.current;
+    setStatus("loading");
+    setError(null);
+    setNextItem(null);
 
     try {
-        const batch = await recommendationFacade.getRecommendationStreamBatch({
-          limit: reset ? 14 : 10,
-          mode: "autoplay",
-          seedVariantTrackId: queueCurrentTrackId,
-          excludeCanonicalTrackIds: knownItems.map((item) => item.canonicalTrackId),
-          recentRecommendationIds: knownItems.map((item) => item.canonicalTrackId),
-        });
+      const batch = await recommendationFacade.getRecommendationStreamBatch({
+        limit: 1,
+        mode: "autoplay",
+        currentTrackId: currentBasisTrackId,
+      });
 
       if (requestIdRef.current !== nextRequestId) {
         return;
       }
 
-      const mergedItems = reset
-        ? batch.items
-        : [
-            ...knownItems,
-            ...batch.items.filter(
-              (item) =>
-                !knownItems.some(
-                  (knownItem) => knownItem.canonicalTrackId === item.canonicalTrackId,
-                ),
-            ),
-          ];
-
-      setItems(mergedItems);
+      setNextItem(batch.items[0] ?? null);
       setSeedLabel(batch.seedLabel);
+      setContextSummary(
+        batch.contextSummary ??
+          (currentBasisTrackId
+            ? "Следующий трек уже подготовлен после текущего."
+            : "Волна готова запуститься с персонального следующего трека."),
+      );
+      setStrategy(batch.strategy ?? "user-feed");
       setStatus("ready");
-      setHasMore(batch.items.length > 0);
     } catch (loadError) {
       if (requestIdRef.current !== nextRequestId) {
         return;
       }
 
       setStatus("error");
-      setError(loadError instanceof Error ? loadError.message : "Не удалось собрать поток.");
-    } finally {
-      if (requestIdRef.current === nextRequestId) {
-        setLoadingMore(false);
-      }
+      setError(loadError instanceof Error ? loadError.message : "Не удалось собрать волну.");
     }
   }
 
   useEffect(() => {
-    void loadBatch(true);
-  }, [isAuthenticated]);
+    void loadWavePreview();
+  }, [currentBasisTrackId, isAuthenticated, reloadToken]);
 
   useEffect(() => {
-    if (!observerTargetRef.current || status !== "ready" || !hasMore) {
+    if (!wavePlaybackStarted || !currentBasisTrackId || !desiredWaveQueueIds.length) {
       return;
     }
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries.some((entry) => entry.isIntersecting) || isLoadingMore) {
-          return;
-        }
-
-        void loadBatch(false);
-      },
-      { rootMargin: "420px 0px" },
-    );
-
-    observer.observe(observerTargetRef.current);
-
-    return () => {
-      observer.disconnect();
-    };
-  }, [hasMore, isLoadingMore, status]);
-
-  useEffect(() => {
-    if (!streamPlaybackStarted || !queueCurrentTrackId || !streamQueueIds.length) {
+    if (areTrackIdsEqual(currentQueue, desiredWaveQueueIds)) {
       return;
     }
 
-    if (!streamQueueIds.includes(queueCurrentTrackId)) {
+    syncQueue(desiredWaveQueueIds, desiredWaveQueueIds);
+  }, [currentBasisTrackId, currentQueue, desiredWaveQueueIds, syncQueue, wavePlaybackStarted]);
+
+  const handlePlayWave = () => {
+    const action = resolveStreamWavePlaybackAction({
+      currentTrackId: currentBasisTrackId,
+      nextTrackId: nextItem?.track.id ?? null,
+      isPlaying: trackListProps.isPlaying,
+    });
+
+    if (action.type === "unavailable") {
       return;
     }
 
-    const queueLooksLikeStream =
-      currentQueue.length > 0 &&
-      currentQueue.every((trackId) => streamQueueIds.includes(trackId));
+    setWavePlaybackStarted(true);
 
-    if (!queueLooksLikeStream || currentQueue.length >= streamQueueIds.length) {
+    if (action.type === "sync-queue") {
+      syncQueue(action.queueIds, action.queueIds);
       return;
     }
 
-    syncQueue(streamQueueIds, streamQueueIds);
-  }, [
-    currentQueue,
-    queueCurrentTrackId,
-    syncQueue,
-    streamPlaybackStarted,
-    streamQueueIds,
-  ]);
+    trackListProps.onPlay(action.startTrackId, action.queueIds);
+  };
 
-  useEffect(() => {
-    if (!streamPlaybackStarted || !queueCurrentTrackId || !hasMore || isLoadingMore) {
-      return;
-    }
+  const handleRefreshWave = () => {
+    setError(null);
+    setReloadToken((value) => value + 1);
+  };
 
-    const currentTrackIndex = streamQueueIds.indexOf(queueCurrentTrackId);
-
-    if (currentTrackIndex < 0) {
-      return;
-    }
-
-    const remainingTracks = streamQueueIds.length - currentTrackIndex - 1;
-    if (remainingTracks <= 5) {
-      void loadBatch(false);
-    }
-  }, [
-    hasMore,
-    isLoadingMore,
-    queueCurrentTrackId,
-    streamPlaybackStarted,
-    streamQueueIds,
-  ]);
-
-  const handlePlayStream = (trackId: string, queueIds: string[]) => {
-    setStreamPlaybackStarted(true);
-    trackListProps.onPlay(trackId, queueIds);
+  const handlePlayNextTrack = (trackId: string, queueIds: string[]) => {
+    setWavePlaybackStarted(true);
+    trackListProps.onPlay(trackId, queueIds.length ? queueIds : [trackId]);
   };
 
   if (!isAuthenticated) {
@@ -203,17 +159,17 @@ export function StreamPage(trackListProps: StreamPageProps) {
               Поток
             </div>
             <h1 className="max-w-2xl text-4xl font-semibold leading-tight text-white">
-              Серверный поток рекомендаций привязан к аккаунту пользователя.
+              Персональная волна привязана к вашему аккаунту и живет на сервере.
             </h1>
             <p className="mt-4 max-w-2xl text-sm leading-7 text-white/60">
-              Чтобы получить персональный бесконечный поток, autoplay после конца очереди и сохранение recommendation-профиля в базе, нужно войти в аккаунт.
+              После входа поток будет показывать только следующий трек и подготавливать новый шаг уже по мере прослушивания.
             </p>
           </div>
         </section>
 
         <EmptyState
-          title="Войдите, чтобы открыть поток"
-          description="Система рекомендаций больше не работает локально во фронтенде. Теперь она целиком исполняется на сервере и использует персональный профиль пользователя из базы данных."
+          title="Войдите, чтобы открыть волну"
+          description="Серверная система рекомендаций использует историю, избранное и поведение в приложении, поэтому для персональной волны нужен аккаунт."
           action={
             <button
               type="button"
@@ -235,44 +191,32 @@ export function StreamPage(trackListProps: StreamPageProps) {
         <div>
           <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-xs uppercase tracking-[0.25em] text-cyan-100/80">
             <Radio size={14} />
-            Поток
+            Волна
           </div>
           <h1 className="max-w-2xl text-4xl font-semibold leading-tight text-white">
-            Бесконечный рекомендательный поток поверх canonical graph и affinity-модели.
+            Бесконечный поток теперь показывает только один следующий трек.
           </h1>
           <p className="mt-4 max-w-2xl text-sm leading-7 text-white/60">
-            Страница собирает playable треки из recommendation engine, держит длинную очередь на фронтенде и автоматически догружает новые рекомендации, пока вы слушаете.
+            Дальний хвост очереди больше не строится на фронтенде. Пока вы слушаете текущий трек, страница держит только следующий шаг волны, а после перехода запрашивает новый.
           </p>
 
           <div className="mt-6 flex flex-wrap gap-3">
             <button
               type="button"
-              onClick={() => {
-                if (!streamQueueIds.length) {
-                  return;
-                }
-
-                handlePlayStream(streamQueueIds[0], streamQueueIds);
-              }}
-              disabled={!streamQueueIds.length}
+              onClick={handlePlayWave}
+              disabled={!nextItem}
               className="inline-flex items-center gap-2 rounded-2xl border border-cyan-300/35 bg-cyan-300/14 px-5 py-3 text-sm font-medium text-cyan-50 transition hover:bg-cyan-300/20 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Waves size={16} />
-              Запустить поток
+              {currentBasisTrackId ? "Подключить волну" : "Запустить волну"}
             </button>
             <button
               type="button"
-              onClick={() => {
-                setStreamPlaybackStarted(false);
-                setItems([]);
-                setSeedLabel("вашему вкусу");
-                setError(null);
-                void loadBatch(true);
-              }}
+              onClick={handleRefreshWave}
               className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-medium text-white/80 transition hover:bg-white/[0.08]"
             >
               <RefreshCw size={16} />
-              Пересобрать поток
+              Обновить
             </button>
           </div>
         </div>
@@ -282,82 +226,71 @@ export function StreamPage(trackListProps: StreamPageProps) {
             <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-cyan-300/15 text-cyan-100">
               <Sparkles size={20} />
             </div>
-            <div className="text-sm uppercase tracking-[0.22em] text-white/35">Текущий seed</div>
-            <div className="mt-2 text-lg font-semibold text-white">{seedLabel}</div>
+            <div className="text-sm uppercase tracking-[0.22em] text-white/35">Профиль волны</div>
+            <div className="mt-2 text-lg font-semibold text-white">Вкус, история и избранное</div>
             <div className="mt-2 text-sm text-white/55">
-              Поток продолжает текущий контекст, историю сессии и устойчивые affinity-сигналы.
+              Текущий трек не влияет на подбор волны. Он нужен только для playback и чтобы не повторить тот же трек.
             </div>
           </div>
           <div className="rounded-[26px] border border-white/10 bg-white/[0.04] p-5">
-            <div className="text-sm uppercase tracking-[0.22em] text-white/35">Загружено</div>
-            <div className="mt-2 text-3xl font-semibold text-white">{streamTracks.length}</div>
+            <div className="text-sm uppercase tracking-[0.22em] text-white/35">Видимый next</div>
+            <div className="mt-2 text-3xl font-semibold text-white">{nextItem ? 1 : 0}</div>
             <div className="mt-2 text-sm text-white/55">
-              Очередь растёт по мере прослушивания и пополняется без остановки воспроизведения.
+              В интерфейсе хранится только один следующий трек, а не длинная локальная очередь.
+            </div>
+          </div>
+          <div className="rounded-[26px] border border-white/10 bg-white/[0.04] p-5">
+            <div className="text-sm uppercase tracking-[0.22em] text-white/35">Стратегия</div>
+            <div className="mt-2 text-lg font-semibold text-white">{strategy}</div>
+            <div className="mt-2 text-sm text-white/55">
+              Волна остаётся бесконечной, но новые треки рождаются только по мере движения playback.
             </div>
           </div>
         </div>
       </section>
 
-      {items.length ? (
-        <section className="grid gap-3 lg:grid-cols-3">
-          {items.slice(0, 3).map((item) => (
-            <div
-              key={`insight:${item.canonicalTrackId}`}
-              className="rounded-[24px] border border-white/10 bg-white/[0.03] p-5 shadow-[0_18px_48px_rgba(0,0,0,0.24)]"
-            >
-              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-white/55">
-                {item.sourceChannels[0] ?? "hybrid"}
-              </div>
-              <div className="text-lg font-semibold text-white">{item.track.title}</div>
-              <div className="mt-1 text-sm text-white/50">{item.track.artist}</div>
-              <div className="mt-4 text-sm leading-6 text-white/65">
-                {(item.explanation.topReasons.slice(0, 3).join(" • ") || "deterministic-match").replace(/channel:/g, "")}
-              </div>
-              <div className="mt-4 inline-flex items-center gap-2 text-sm text-cyan-100/80">
-                Оценка {item.score.toFixed(2)}
-                <ArrowRight size={14} />
-              </div>
+      {nextItem ? (
+        <section className="rounded-[24px] border border-white/10 bg-white/[0.03] p-5 shadow-[0_18px_48px_rgba(0,0,0,0.24)]">
+          <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-white/55">
+            {nextItem.sourceChannels[0] ?? "wave"}
+          </div>
+          <div className="text-lg font-semibold text-white">Следующий трек волны</div>
+          <div className="mt-2 text-sm leading-6 text-white/65">
+            {(nextItem.explanation.topReasons.slice(0, 3).join(" • ") || "user taste").replace(/channel:/g, "")}
+          </div>
+          {wavePlaybackStarted && currentBasisTrackId ? (
+            <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-xs uppercase tracking-[0.18em] text-cyan-100/80">
+              Уже стоит следующим после текущего трека
             </div>
-          ))}
+          ) : null}
         </section>
       ) : null}
 
       <section>
         <div className="mb-4 flex items-center justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-semibold text-white">Рекомендованные треки</h2>
+            <h2 className="text-2xl font-semibold text-white">Следующий трек</h2>
             <p className="mt-1 text-sm text-white/50">
-              Playable очередь для радиопотока, autoplay и продолжения текущей сессии.
+              Здесь виден только один следующий шаг. После перехода на него волна запросит ещё один.
             </p>
           </div>
-          {isLoadingMore ? (
-            <div className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/55">
-              Догружаем
-            </div>
-          ) : null}
         </div>
 
         {status === "loading" ? (
           <EmptyState
-            title="Собираем поток"
-            description="Движок подбирает стартовую очередь рекомендаций и готовит playable варианты."
+            title="Подготавливаем следующий трек"
+            description="Сервер подбирает только один следующий шаг волны, чтобы очередь не разрасталась заранее."
           />
         ) : null}
 
         {status === "error" ? (
           <EmptyState
-            title="Не удалось построить поток"
+            title="Не удалось построить волну"
             description={error ?? "Проверьте каталог и повторите попытку."}
             action={
               <button
                 type="button"
-                onClick={() => {
-                  setStreamPlaybackStarted(false);
-                  setItems([]);
-                  setSeedLabel("вашему вкусу");
-                  setError(null);
-                  void loadBatch(true);
-                }}
+                onClick={handleRefreshWave}
                 className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-medium text-white/80 transition hover:bg-white/[0.08]"
               >
                 <RefreshCw size={16} />
@@ -367,26 +300,23 @@ export function StreamPage(trackListProps: StreamPageProps) {
           />
         ) : null}
 
-        {status === "ready" && streamTracks.length ? (
-          <>
-            <TrackList
-              tracks={streamTracks}
-              currentTrackId={trackListProps.currentTrackId}
-              isPlaying={trackListProps.isPlaying}
-              onPlay={handlePlayStream}
-              onToggleFavorite={trackListProps.onToggleFavorite}
-              onAddToPlaylist={trackListProps.onAddToPlaylist}
-              onShowLyrics={trackListProps.onShowLyrics}
-              onOpenArtist={trackListProps.onOpenArtist}
-            />
-            <div ref={observerTargetRef} className="h-8 w-full" />
-          </>
+        {status === "ready" && visibleTracks.length ? (
+          <TrackList
+            tracks={visibleTracks}
+            currentTrackId={trackListProps.currentTrackId}
+            isPlaying={trackListProps.isPlaying}
+            onPlay={handlePlayNextTrack}
+            onToggleFavorite={trackListProps.onToggleFavorite}
+            onAddToPlaylist={trackListProps.onAddToPlaylist}
+            onShowLyrics={trackListProps.onShowLyrics}
+            onOpenArtist={trackListProps.onOpenArtist}
+          />
         ) : null}
 
-        {status === "ready" && !streamTracks.length ? (
+        {status === "ready" && !visibleTracks.length ? (
           <EmptyState
-            title="Поток пока пуст"
-            description="Поток уже использует избранное и историю автоматически. Если здесь пусто, значит в текущем каталоге пока недостаточно связанных playable рекомендаций."
+            title="Следующий трек пока не найден"
+            description="В текущем состоянии каталога и пользовательского профиля сервер не смог подобрать ещё один шаг волны."
           />
         ) : null}
       </section>

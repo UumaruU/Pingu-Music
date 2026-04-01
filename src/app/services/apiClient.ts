@@ -111,7 +111,9 @@ async function requestInternal<T>(
     nextHeaders["Content-Type"] = serialized.contentType;
   }
 
-  const accessToken = auth ? sessionService.getAccessToken() : null;
+  const accessToken = auth
+    ? sessionService.getAccessToken() ?? (await sessionService.loadAccessToken())
+    : null;
 
   if (accessToken) {
     nextHeaders.Authorization = `Bearer ${accessToken}`;

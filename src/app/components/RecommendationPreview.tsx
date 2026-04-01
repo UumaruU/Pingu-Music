@@ -121,9 +121,11 @@ export function RecommendationPreview({
           <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-cyan-300/12 text-cyan-100">
             <Sparkles size={18} />
           </div>
-          <div className="text-sm uppercase tracking-[0.2em] text-white/40">Основа</div>
-          <div className="mt-2 text-lg font-semibold text-white">{seedLabel}</div>
-          <div className="mt-2 text-sm text-white/55">Текущий seed для потока и autoplay.</div>
+          <div className="text-sm uppercase tracking-[0.2em] text-white/40">Профиль</div>
+          <div className="mt-2 text-lg font-semibold text-white">Вкус, история и избранное</div>
+          <div className="mt-2 text-sm text-white/55">
+            Текущий трек не задает основу recommendation feed. Сервер опирается на весь профиль пользователя.
+          </div>
         </div>
         <div className="rounded-[24px] border border-white/10 bg-white/[0.04] p-5">
           <div className="text-sm uppercase tracking-[0.2em] text-white/40">В очереди</div>

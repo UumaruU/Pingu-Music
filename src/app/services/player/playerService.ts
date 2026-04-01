@@ -285,6 +285,18 @@ class PlayerService {
     }
   }
 
+  private async continueWithRecommendation() {
+    const recommendation = await recommendationFacade.getNextRecommendedTrack();
+
+    if (recommendation?.preferredVariantId) {
+      this.playTrack(recommendation.preferredVariantId, [recommendation.preferredVariantId]);
+      return true;
+    }
+
+    this.getState().setPlaybackState(false);
+    return false;
+  }
+
   playTrack(trackId: string, queueIds: string[]) {
     this.initialize();
     if (this.getState().currentTrackId && this.getState().currentTrackId !== trackId) {
@@ -387,7 +399,7 @@ class PlayerService {
       return;
     }
 
-    state.setPlaybackState(false);
+    void this.continueWithRecommendation();
   }
 
   playPrevious() {
@@ -442,14 +454,7 @@ class PlayerService {
     const isLastTrack = state.currentTrackIndex >= state.currentQueue.length - 1;
 
     if (isLastTrack && state.playerSettings.repeatMode === "off") {
-      const recommendation = await recommendationFacade.getNextRecommendedTrack();
-
-      if (recommendation?.preferredVariantId) {
-        this.playTrack(recommendation.preferredVariantId, [recommendation.preferredVariantId]);
-        return;
-      }
-
-      state.setPlaybackState(false);
+      await this.continueWithRecommendation();
       return;
     }
 
