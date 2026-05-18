@@ -60,6 +60,49 @@ interface RecommendationStreamBatchOptions {
   recentRecommendationIds?: string[];
 }
 
+export interface RecommendationImpressionInput {
+  requestId: string;
+  surface: string;
+  position: number;
+  trackId: string;
+  occurredAt?: string;
+}
+
+export interface RecommendationInteractionInput {
+  requestId: string;
+  surface: string;
+  position: number;
+  trackId: string;
+  action: "play" | "skip" | "open" | "favorite" | "playlist_add" | "dislike" | "dismiss";
+  listenedMs?: number;
+  trackDurationMs?: number;
+  playlistId?: string;
+  metadata?: Record<string, unknown> | null;
+  occurredAt?: string;
+}
+
+type UnifiedRecommendationEventType =
+  | "impression"
+  | "play"
+  | "skip"
+  | "seek"
+  | "like"
+  | "save"
+  | "add_to_playlist"
+  | "share";
+
+interface UnifiedRecommendationEventInput {
+  type: UnifiedRecommendationEventType;
+  track_id?: string;
+  artist_id?: string;
+  session_id?: string;
+  source_surface?: string;
+  position?: number;
+  timestamp?: string;
+  recommendation_request_id?: string;
+  context?: Record<string, unknown> | null;
+}
+
 function canUseRecommendations() {
   return useAuthStore.getState().isAuthenticated;
 }
@@ -97,6 +140,21 @@ async function ensureRecommendationCatalogSynced(extraTrackIds: string[] = []) {
   }
 
   await serverTrackCatalogService.syncTracks(getRecommendationRelevantTracks(extraTrackIds));
+}
+
+async function sendRecommendationEvents(events: UnifiedRecommendationEventInput[], keepalive = false) {
+  if (!canUseRecommendations() || !events.length) {
+    return;
+  }
+
+  await apiClient.request<void>("/me/recommendations/events", {
+    method: "POST",
+    parseAs: "void",
+    keepalive,
+    body: {
+      events,
+    },
+  });
 }
 
 function hydrateTracks(tracks: Track[]) {
@@ -195,20 +253,21 @@ export const recommendationFacade = {
     }
 
     await ensureRecommendationCatalogSynced([trackId]);
-    await apiClient.request<void>("/me/recommendations/events/playback", {
-      method: "POST",
-      parseAs: "void",
-      body: {
-        trackId,
-        listenedMs: payload.listenedMs,
-        trackDurationMs: payload.trackDurationMs,
-        occurredAt: new Date().toISOString(),
-        endedNaturally: payload.endedNaturally,
-        wasSkipped: payload.wasSkipped,
-        sessionId: currentSessionId,
-        seedChannels: payload.seedChannels?.length ? payload.seedChannels : undefined,
+    await sendRecommendationEvents([
+      {
+        type: payload.wasSkipped ? "skip" : "play",
+        track_id: trackId,
+        session_id: currentSessionId,
+        timestamp: new Date().toISOString(),
+        context: {
+          listenedMs: payload.listenedMs,
+          trackDurationMs: payload.trackDurationMs,
+          endedNaturally: payload.endedNaturally,
+          wasSkipped: payload.wasSkipped,
+          seedChannels: payload.seedChannels?.length ? payload.seedChannels : undefined,
+        },
       },
-    });
+    ]);
   },
 
   async updateFavoriteAffinityForVariantTrack(trackId: string, isFavorite: boolean) {
@@ -217,6 +276,20 @@ export const recommendationFacade = {
     }
 
     await ensureRecommendationCatalogSynced([trackId]);
+    if (isFavorite) {
+      await sendRecommendationEvents([
+        {
+          type: "like",
+          track_id: trackId,
+          timestamp: new Date().toISOString(),
+          context: {
+            isFavorite,
+          },
+        },
+      ]);
+      return;
+    }
+
     await apiClient.request<void>("/me/recommendations/events/favorite", {
       method: "POST",
       parseAs: "void",
@@ -234,6 +307,21 @@ export const recommendationFacade = {
     }
 
     await ensureRecommendationCatalogSynced([trackId]);
+    if (isAdded) {
+      await sendRecommendationEvents([
+        {
+          type: "add_to_playlist",
+          track_id: trackId,
+          timestamp: new Date().toISOString(),
+          context: {
+            playlistId,
+            isAdded,
+          },
+        },
+      ]);
+      return;
+    }
+
     await apiClient.request<void>("/me/recommendations/events/playlist", {
       method: "POST",
       parseAs: "void",
@@ -242,6 +330,108 @@ export const recommendationFacade = {
         playlistId,
         occurredAt: new Date().toISOString(),
         isAdded,
+      },
+    });
+  },
+
+  async recordRecommendationImpressions(items: RecommendationImpressionInput[]) {
+    if (!canUseRecommendations() || !items.length) {
+      return;
+    }
+
+    await ensureRecommendationCatalogSynced(items.map((item) => item.trackId));
+    await sendRecommendationEvents(
+      items.map((item) => ({
+        type: "impression",
+        track_id: item.trackId,
+        source_surface: item.surface,
+        position: item.position,
+        timestamp: item.occurredAt ?? new Date().toISOString(),
+        recommendation_request_id: item.requestId,
+      })),
+      true,
+    );
+  },
+
+  async recordRecommendationInteraction(input: RecommendationInteractionInput) {
+    if (!canUseRecommendations()) {
+      return;
+    }
+
+    await ensureRecommendationCatalogSynced([input.trackId]);
+    const unifiedType =
+      input.action === "play"
+        ? "play"
+        : input.action === "skip" || input.action === "dismiss"
+          ? "skip"
+          : input.action === "favorite"
+            ? "like"
+            : input.action === "playlist_add"
+              ? "add_to_playlist"
+              : null;
+
+    if (unifiedType) {
+      await sendRecommendationEvents(
+        [
+          {
+            type: unifiedType,
+            track_id: input.trackId,
+            source_surface: input.surface,
+            position: input.position,
+            timestamp: input.occurredAt ?? new Date().toISOString(),
+            recommendation_request_id: input.requestId,
+            context: {
+              action: input.action,
+              listenedMs: input.listenedMs,
+              trackDurationMs: input.trackDurationMs,
+              playlistId: input.playlistId,
+              metadata: input.metadata ?? null,
+            },
+          },
+        ],
+        true,
+      );
+      return;
+    }
+
+    if (input.action === "dislike") {
+      await recommendationFacade.updateDislikeAffinityForVariantTrack(input.trackId, true);
+      return;
+    }
+
+    await apiClient.request<void>("/me/recommendations/events/interaction", {
+      method: "POST",
+      parseAs: "void",
+      keepalive: true,
+      body: {
+        requestId: input.requestId,
+        surface: input.surface,
+        position: input.position,
+        trackId: input.trackId,
+        action: input.action,
+        occurredAt: input.occurredAt ?? new Date().toISOString(),
+        listenedMs: input.listenedMs,
+        trackDurationMs: input.trackDurationMs,
+        playlistId: input.playlistId,
+        metadata: input.metadata,
+      },
+    });
+  },
+
+  async updateDislikeAffinityForVariantTrack(trackId: string, isDisliked: boolean) {
+    if (!canUseRecommendations()) {
+      return;
+    }
+
+    await ensureRecommendationCatalogSynced([trackId]);
+    await apiClient.request<void>("/me/recommendations/events/dislike", {
+      method: "POST",
+      parseAs: "void",
+      keepalive: true,
+      body: {
+        trackId,
+        occurredAt: new Date().toISOString(),
+        isDisliked,
       },
     });
   },
