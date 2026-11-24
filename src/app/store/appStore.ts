@@ -22,6 +22,11 @@ import {
   Track,
 } from "../types";
 import { withTrackProviderDefaults } from "../core/tracks/trackIdentity";
+import {
+  PlaylistDetailsDraft,
+  applyPlaylistDetailsPatch,
+  normalizePlaylistDetailsDraft,
+} from "../services/playlistDetails";
 
 type TrackMap = Record<string, Track>;
 type ArtistMap = Record<string, Artist>;
@@ -168,7 +173,8 @@ interface AppState {
   setArtistTrackStatus: (artistId: string, status: EntityLoadStatus) => void;
   setReleaseStatus: (releaseId: string, status: EntityLoadStatus) => void;
   setLyrics: (lyrics: Lyrics) => void;
-  createPlaylist: (name: string) => string;
+  createPlaylist: (name: string, details?: PlaylistDetailsDraft) => string;
+  updatePlaylistDetails: (playlistId: string, patch: PlaylistDetailsDraft) => void;
   deletePlaylist: (playlistId: string) => void;
   addTrackToPlaylist: (playlistId: string, trackId: string) => void;
   removeTrackFromPlaylist: (playlistId: string, trackId: string) => void;
@@ -732,20 +738,36 @@ export const useAppStore = create<AppState>()(
           },
         }));
       },
-      createPlaylist: (name) => {
+      createPlaylist: (name, details) => {
         const playlistId = crypto.randomUUID();
+        const normalized = normalizePlaylistDetailsDraft({
+          ...details,
+          name,
+        });
+        const now = new Date().toISOString();
+
         set((state) => ({
           playlists: [
             {
               id: playlistId,
-              name,
+              name: normalized.name,
               trackIds: [],
-              createdAt: new Date().toISOString(),
+              createdAt: now,
+              updatedAt: now,
+              coverUrl: normalized.coverUrl,
+              coverAccent: normalized.coverAccent,
             },
             ...state.playlists,
           ],
         }));
         return playlistId;
+      },
+      updatePlaylistDetails: (playlistId, patch) => {
+        set((state) => ({
+          playlists: state.playlists.map((playlist) =>
+            playlist.id === playlistId ? applyPlaylistDetailsPatch(playlist, patch) : playlist,
+          ),
+        }));
       },
       deletePlaylist: (playlistId) => {
         set((state) => ({

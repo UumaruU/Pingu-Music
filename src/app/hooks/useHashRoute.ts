@@ -3,7 +3,7 @@ import { RouteState } from "../types";
 
 const homeRoute: RouteState = { page: "home" };
 
-function parseRoute(hash: string): RouteState {
+export function parseRoute(hash: string): RouteState {
   const normalized = hash.replace(/^#/, "");
 
   if (!normalized || normalized === "/") {
@@ -28,14 +28,57 @@ function parseRoute(hash: string): RouteState {
     return { page: "release", releaseId: segments[1] };
   }
 
+  if (segments[0] === "admin") {
+    if (segments[1] === "recommendations") {
+      return segments[2]
+        ? {
+            page: "admin",
+            adminSection: "recommendations",
+            adminRequestId: segments[2],
+          }
+        : {
+            page: "admin",
+            adminSection: "recommendations",
+          };
+    }
+
+    if (segments[1] === "discovery" && segments[2] === "jobs") {
+      return segments[3]
+        ? {
+            page: "admin",
+            adminSection: "discovery",
+            adminJobId: segments[3],
+          }
+        : {
+            page: "admin",
+            adminSection: "discovery",
+          };
+    }
+
+    if (segments[1] === "users") {
+      return segments[2]
+        ? {
+            page: "admin",
+            adminSection: "profile",
+            adminUserId: segments[2],
+          }
+        : {
+            page: "admin",
+            adminSection: "profile",
+          };
+    }
+
+    return { page: "admin", adminSection: "recommendations" };
+  }
+
   if (
     segments[0] === "favorites" ||
     segments[0] === "playlists" ||
-    segments[0] === "stream" ||
     segments[0] === "search" ||
     segments[0] === "history" ||
     segments[0] === "login" ||
     segments[0] === "register" ||
+    segments[0] === "admin" ||
     segments[0] === "home"
   ) {
     return { page: segments[0] };
@@ -44,7 +87,7 @@ function parseRoute(hash: string): RouteState {
   return homeRoute;
 }
 
-function routeToHash(route: RouteState) {
+export function routeToHash(route: RouteState) {
   if (route.page === "playlists" && route.playlistId) {
     return `#/playlists/${route.playlistId}`;
   }
@@ -59,6 +102,22 @@ function routeToHash(route: RouteState) {
     }
 
     return `#/releases/${route.releaseId}`;
+  }
+
+  if (route.page === "admin") {
+    if (route.adminSection === "discovery") {
+      return route.adminJobId
+        ? `#/admin/discovery/jobs/${route.adminJobId}`
+        : "#/admin/discovery/jobs";
+    }
+
+    if (route.adminSection === "profile") {
+      return route.adminUserId ? `#/admin/users/${route.adminUserId}` : "#/admin/users";
+    }
+
+    return route.adminRequestId
+      ? `#/admin/recommendations/${route.adminRequestId}`
+      : "#/admin/recommendations";
   }
 
   return route.page === "home" ? "#/home" : `#/${route.page}`;

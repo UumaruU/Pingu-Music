@@ -1,18 +1,18 @@
-﻿import logoUrl from "@/assets/pingu-logo.png";
+import logoUrl from "@/assets/inspires-logo.png";
 
 export function BrandMark() {
   return (
     <div className="flex items-center gap-3">
-      <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-cyan-200/25 bg-[#0d1b24] p-1 shadow-[0_14px_40px_rgba(0,0,0,0.45)]">
+      <div className="flex h-11 w-11 items-center justify-center rounded-[18px] border border-white/[0.07] bg-black p-2 shadow-[0_16px_40px_rgba(0,0,0,0.45)]">
         <img
           src={logoUrl}
-          alt="Логотип Pingu Music"
-          className="h-full w-full rounded-xl bg-black object-contain p-1"
+          alt="Логотип Inspires Music"
+          className="h-full w-full object-contain"
         />
       </div>
-      <div>
-        <div className="text-[11px] uppercase tracking-[0.35em] text-cyan-200/70">Desktop player</div>
-        <div className="text-xl font-semibold text-white">Pingu Music</div>
+      <div className="min-w-0">
+        <div className="text-[10px] uppercase tracking-[0.32em] text-white/[0.42]">Desktop player</div>
+        <div className="truncate text-lg font-semibold text-white">Inspires Music</div>
       </div>
     </div>
   );

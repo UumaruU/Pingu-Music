@@ -11,12 +11,12 @@ import { canonicalizationConfig } from "./config/canonicalizationConfig";
 import { useDebouncedValue } from "./hooks/useDebouncedValue";
 import { useHashRoute } from "./hooks/useHashRoute";
 import { HomePage } from "./pages/HomePage";
-import { StreamPage } from "./pages/StreamPage";
 import { downloadService } from "./services/downloadService";
 import { trackCanonicalizationService } from "./services/trackCanonicalizationService";
+import { PlaylistDetailsDraft } from "./services/playlistDetails";
 import { useAppStore } from "./store/appStore";
 import { useAuthStore } from "./store/authStore";
-import { ListenHistoryEntry, RouteId, Track } from "./types";
+import { AdminSectionId, ListenHistoryEntry, RouteId, Track } from "./types";
 import { syncService } from "./services/syncService";
 
 type NowPlayingViewMode = "cover" | "details";
@@ -49,6 +49,11 @@ const LoginPage = lazy(() =>
 );
 const RegisterPage = lazy(() =>
   import("./pages/RegisterPage").then((module) => ({ default: module.RegisterPage })),
+);
+const AdminObservatoryPage = lazy(() =>
+  import("./pages/AdminObservatoryPage").then((module) => ({
+    default: module.AdminObservatoryPage,
+  })),
 );
 const AddToPlaylistModal = lazy(() =>
   import("./components/AddToPlaylistModal").then((module) => ({
@@ -96,7 +101,7 @@ function sortHistoryByDateDesc(left: ListenHistoryEntry, right: ListenHistoryEnt
 
 function PageLoader() {
   return (
-    <div className="rounded-[32px] border border-white/10 bg-white/[0.03] p-8 text-sm text-white/55 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
+    <div className="inspires-panel rounded-[28px] p-8 text-sm text-white/55">
       Загрузка...
     </div>
   );
@@ -433,6 +438,7 @@ export default function App() {
   const [nowPlayingViewMode, setNowPlayingViewMode] = useState<NowPlayingViewMode>("cover");
   const debouncedSearchValue = useDebouncedValue(searchValue, 350);
   const isAuthRoute = route.page === "login" || route.page === "register";
+  const isAdminRoute = route.page === "admin";
 
   useEffect(() => {
     syncService.initializeRealtimeSync();
@@ -724,12 +730,16 @@ export default function App() {
   };
 
   const handleRouteChange = (page: RouteId) => {
-    if (page === "stream" && !authState.isAuthenticated) {
-      navigate({ page: "login" });
+    if (page === "admin") {
+      navigate({ page, adminSection: "recommendations" });
       return;
     }
 
     navigate({ page });
+  };
+
+  const handleAdminSectionChange = (section: AdminSectionId) => {
+    navigate({ page: "admin", adminSection: section });
   };
 
   const handleSearchChange = (value: string) => {
@@ -764,9 +774,9 @@ export default function App() {
     }
   };
 
-  const handleCreatePlaylist = (name: string) => {
+  const handleCreatePlaylist = (name: string, details?: PlaylistDetailsDraft) => {
     void loadPlaylistService().then((playlistService) => {
-      const playlistId = playlistService.createPlaylist(name);
+      const playlistId = playlistService.createPlaylist(name, details);
 
       if (!playlistModalTrackId) {
         return;
@@ -775,6 +785,12 @@ export default function App() {
       playlistService.addTrackToPlaylist(playlistId, playlistModalTrackId);
       setPlaylistModalTrackId(null);
     });
+  };
+
+  const handleUpdatePlaylist = (playlistId: string, patch: PlaylistDetailsDraft) => {
+    void loadPlaylistService().then((playlistService) =>
+      playlistService.updatePlaylistDetails(playlistId, patch),
+    );
   };
 
   const renderPage = () => {
@@ -806,12 +822,52 @@ export default function App() {
       );
     }
 
-    if (route.page === "favorites") {
-      return <FavoritesPage tracks={favoriteTracks} {...pageActions} />;
+    if (route.page === "admin") {
+      return (
+        <AdminObservatoryPage
+          route={route}
+          onNavigateSection={handleAdminSectionChange}
+          onOpenRequest={(requestId) =>
+            navigate({
+              page: "admin",
+              adminSection: "recommendations",
+              adminRequestId: requestId ?? undefined,
+            })
+          }
+          onOpenDiscoveryJob={(jobId) =>
+            navigate({
+              page: "admin",
+              adminSection: "discovery",
+              adminJobId: jobId ?? undefined,
+            })
+          }
+          onOpenUser={(userId) =>
+            navigate({
+              page: "admin",
+              adminSection: "profile",
+              adminUserId: userId,
+            })
+          }
+        />
+      );
     }
 
-    if (route.page === "stream") {
-      return <StreamPage {...pageActions} onOpenLogin={() => navigate({ page: "login" })} />;
+    if (route.page === "favorites") {
+      return (
+        <FavoritesPage
+          tracks={favoriteTracks}
+          playlists={appState.playlists}
+          onCreatePlaylist={handleCreatePlaylist}
+          onUpdatePlaylist={handleUpdatePlaylist}
+          onOpenPlaylist={(playlistId) => navigate({ page: "playlists", playlistId })}
+          onDeletePlaylist={(playlistId) => {
+            void loadPlaylistService().then((playlistService) =>
+              playlistService.deletePlaylist(playlistId),
+            );
+          }}
+          {...pageActions}
+        />
+      );
     }
 
     if (route.page === "history") {
@@ -848,7 +904,7 @@ export default function App() {
               playlistService.removeTrackFromPlaylist(selectedPlaylist.id, trackId),
             );
           }}
-          onBack={() => navigate({ page: "playlists" })}
+          onBack={() => navigate({ page: "favorites" })}
           {...pageActions}
         />
       );
@@ -859,6 +915,7 @@ export default function App() {
         <PlaylistsPage
           playlists={appState.playlists}
           onCreatePlaylist={handleCreatePlaylist}
+          onUpdatePlaylist={handleUpdatePlaylist}
           onOpenPlaylist={(playlistId) => navigate({ page: "playlists", playlistId })}
           onDeletePlaylist={(playlistId) => {
             void loadPlaylistService().then((playlistService) =>
@@ -909,9 +966,6 @@ export default function App() {
     return (
       <HomePage
         tracks={popularTracks}
-        onOpenStream={() =>
-          navigate({ page: authState.isAuthenticated ? "stream" : "login" })
-        }
         onOpenLogin={() => navigate({ page: "login" })}
         {...pageActions}
       />
@@ -919,10 +973,10 @@ export default function App() {
   };
 
   return (
-    <div className="h-screen overflow-hidden bg-[radial-gradient(circle_at_top,#1f2937,transparent_28%),linear-gradient(180deg,#06070b,#0b0d11_45%,#090b0f)] text-white">
-      <div className="flex h-full">
+    <div className="h-screen overflow-hidden bg-[radial-gradient(circle_at_top,#13131a_0%,#050505_38%)] p-[18px] text-white">
+      <div className="flex h-full gap-[14px] overflow-hidden rounded-[30px] border border-white/[0.04] bg-[linear-gradient(180deg,rgba(255,255,255,0.015),rgba(255,255,255,0.005))] p-[10px] shadow-[0_24px_60px_rgba(0,0,0,0.42)]">
         <Sidebar
-          activePage={route.page}
+          activePage={route.page === "playlists" ? "favorites" : route.page}
           onNavigate={handleRouteChange}
           user={authState.user}
           isAuthenticated={authState.isAuthenticated}
@@ -933,17 +987,17 @@ export default function App() {
           }}
         />
 
-        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <header className="shrink-0 border-b border-white/6 px-5 py-5 sm:px-6">
-            <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-5">
+        <div className="flex min-w-0 flex-1 flex-col gap-[12px] overflow-hidden">
+          <header className="shrink-0 px-[2px] pt-[6px]">
+            <div className="flex w-full flex-col gap-[14px]">
               <div className="flex items-center justify-between xl:hidden">
                 <BrandMark />
                 <div className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs uppercase tracking-[0.22em] text-white/55">
                   <Music2 size={14} className="mr-2 inline-block" />
-                  Russian UI
+                  Music
                 </div>
               </div>
-              {!isAuthRoute ? (
+              {!isAuthRoute && !isAdminRoute ? (
                 <SearchBar
                   value={searchValue}
                   recentQueries={recentQueries}
@@ -956,17 +1010,13 @@ export default function App() {
             </div>
           </header>
 
-          <main
-            className={`scrollbar-none min-h-0 flex-1 overflow-y-auto px-5 py-6 sm:px-6 ${
-              isAuthRoute ? "pb-8" : "pb-40"
-            }`}
-          >
-            <div className="mx-auto w-full max-w-[1500px]">
+          <main className="scrollbar-none min-h-0 flex-1 overflow-y-auto">
+            <div className="h-full w-full rounded-[28px] border border-white/[0.06] bg-[linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.012))] p-[28px_24px_24px] shadow-[0_24px_60px_rgba(0,0,0,0.42)]">
               <Suspense fallback={<PageLoader />}>{renderPage()}</Suspense>
             </div>
           </main>
 
-          {!isAuthRoute ? (
+          {!isAuthRoute && !isAdminRoute ? (
             <div className="shrink-0">
               <PlayerBarContainer
                 onAddToPlaylist={(trackId) => setPlaylistModalTrackId(trackId)}
@@ -983,7 +1033,7 @@ export default function App() {
         </div>
       </div>
 
-      {!isAuthRoute ? (
+      {!isAuthRoute && !isAdminRoute ? (
         <>
           <NowPlayingModalContainer
             open={isNowPlayingOpen}

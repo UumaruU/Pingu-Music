@@ -1,9 +1,14 @@
 import { recommendationFacade } from "../integrations/recommendation/recommendationFacade";
 import { useAppStore } from "../store/appStore";
+import { PlaylistDetailsDraft } from "./playlistDetails";
 
 export const playlistService = {
-  createPlaylist(name: string) {
-    return useAppStore.getState().createPlaylist(name);
+  createPlaylist(name: string, details?: PlaylistDetailsDraft) {
+    return useAppStore.getState().createPlaylist(name, details);
+  },
+
+  updatePlaylistDetails(playlistId: string, patch: PlaylistDetailsDraft) {
+    useAppStore.getState().updatePlaylistDetails(playlistId, patch);
   },
 
   deletePlaylist(playlistId: string) {

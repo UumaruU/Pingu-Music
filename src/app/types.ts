@@ -1,6 +1,5 @@
 export type RouteId =
   | "home"
-  | "stream"
   | "history"
   | "favorites"
   | "playlists"
@@ -8,7 +7,10 @@ export type RouteId =
   | "login"
   | "register"
   | "artist"
-  | "release";
+  | "release"
+  | "admin";
+
+export type AdminSectionId = "recommendations" | "profile" | "discovery";
 
 export type RepeatMode = "off" | "one" | "all";
 export type DownloadState = "idle" | "downloading" | "downloaded" | "error";
@@ -153,6 +155,9 @@ export interface Playlist {
   name: string;
   trackIds: string[];
   createdAt: string;
+  updatedAt?: string;
+  coverUrl?: string;
+  coverAccent?: string;
 }
 
 export interface PlayerSettings {
@@ -185,6 +190,10 @@ export interface RouteState {
   playlistId?: string;
   artistId?: string;
   releaseId?: string;
+  adminSection?: AdminSectionId;
+  adminRequestId?: string;
+  adminJobId?: string;
+  adminUserId?: string;
 }
 
 export interface AuthUser {

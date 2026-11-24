@@ -1,3 +1,118 @@
 @import './fonts.css';
 @import './tailwind.css';
 @import './theme.css';
+
+:root {
+  --im-bg: #050505;
+  --im-bg-2: #0d0d12;
+  --im-panel: #0b0b0d;
+  --im-panel-2: #101114;
+  --im-panel-3: #14161b;
+  --im-soft: #17181c;
+  --im-soft-2: #1d1f24;
+  --im-text: #f2f2f2;
+  --im-muted: #8a8c95;
+  --im-muted-2: #666973;
+  --im-line: rgba(255, 255, 255, 0.06);
+  --im-line-2: rgba(255, 255, 255, 0.03);
+  --im-green: #37d46b;
+  --im-purple: #b53cff;
+  --im-cyan: #14d8ff;
+  --im-pink: #ff4dd2;
+  --im-shadow: 0 24px 60px rgba(0, 0, 0, 0.42);
+  --im-radius-xl: 28px;
+  --im-radius-lg: 22px;
+  --im-radius-md: 16px;
+  --im-radius-sm: 12px;
+}
+
+body {
+  background: radial-gradient(circle at top, #13131a 0%, #050505 38%);
+}
+
+.inspires-shell {
+  background:
+    radial-gradient(circle at top, #13131a 0%, #050505 38%),
+    linear-gradient(180deg, #050505, #07070a);
+}
+
+.inspires-app-frame {
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.015), rgba(255, 255, 255, 0.005));
+  box-shadow: var(--im-shadow);
+}
+
+.inspires-panel {
+  border: 1px solid var(--im-line);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.032), rgba(255, 255, 255, 0.014));
+  box-shadow: var(--im-shadow);
+}
+
+.inspires-page-card {
+  border: 1px solid var(--im-line);
+  border-radius: 30px;
+  background:
+    radial-gradient(circle at top left, rgba(181, 60, 255, 0.1), transparent 30%),
+    linear-gradient(180deg, rgba(16, 17, 20, 0.88), rgba(8, 8, 10, 0.92));
+}
+
+.inspires-lift {
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.inspires-lift:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.inspires-artwork {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 20% 10%, rgba(255, 255, 255, 0.34), transparent 25%),
+    linear-gradient(135deg, rgba(181, 60, 255, 0.9), rgba(20, 216, 255, 0.72));
+}
+
+.inspires-artwork::after {
+  position: absolute;
+  inset: auto -22% -34% 20%;
+  height: 74%;
+  content: "";
+  border-radius: 999px 999px 0 0;
+  background: rgba(0, 0, 0, 0.28);
+  transform: rotate(-12deg);
+}
+
+.inspires-artwork-green {
+  background:
+    radial-gradient(circle at 20% 10%, rgba(255, 255, 255, 0.36), transparent 25%),
+    linear-gradient(135deg, rgba(55, 212, 107, 0.86), rgba(20, 216, 255, 0.62));
+}
+
+.inspires-artwork-pink {
+  background:
+    radial-gradient(circle at 20% 10%, rgba(255, 255, 255, 0.36), transparent 25%),
+    linear-gradient(135deg, rgba(255, 77, 210, 0.86), rgba(181, 60, 255, 0.7));
+}
+
+.inspires-artwork-amber {
+  background:
+    radial-gradient(circle at 20% 10%, rgba(255, 255, 255, 0.32), transparent 25%),
+    linear-gradient(135deg, rgba(255, 194, 87, 0.88), rgba(255, 77, 210, 0.58));
+}
+
+.inspires-focus-ring:focus-visible {
+  outline: 2px solid rgba(20, 216, 255, 0.7);
+  outline-offset: 3px;
+}
+
+@media (max-width: 768px) {
+  .inspires-page-card {
+    border-radius: 24px;
+  }
+}

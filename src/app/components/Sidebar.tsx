@@ -1,9 +1,8 @@
-import { Heart, History, House, ListMusic, LogIn, LogOut, Radio, UserPlus } from "lucide-react";
+import { Activity, Heart, History, House, Search, Settings, User } from "lucide-react";
 import { AuthUser, RouteId } from "../types";
 import { getUserDisplayName } from "../services/userService";
 import { BrandMark } from "./BrandMark";
-
-type PrimaryRoute = "home" | "stream" | "history" | "favorites" | "playlists";
+import { SidebarIconKey, getSidebarNavItems } from "./sidebarItems";
 
 interface SidebarProps {
   activePage: RouteId;
@@ -15,6 +14,16 @@ interface SidebarProps {
   onLogout: () => void;
 }
 
+const iconByKey: Record<SidebarIconKey, typeof House> = {
+  home: House,
+  favorites: Heart,
+  search: Search,
+  history: History,
+  profile: User,
+  settings: Settings,
+  activity: Activity,
+};
+
 export function Sidebar({
   activePage,
   onNavigate,
@@ -24,102 +33,74 @@ export function Sidebar({
   hasRestoredSession,
   onLogout,
 }: SidebarProps) {
-  const navItems: Array<{
-    id: PrimaryRoute;
-    label: string;
-    icon: typeof House;
-    hint: string;
-  }> = [
-    { id: "home", label: "Главная", icon: House, hint: "Популярное и подборки" },
-    { id: "stream", label: "Поток", icon: Radio, hint: "Бесконечные рекомендации" },
-    { id: "history", label: "История", icon: History, hint: "Прослушанные треки" },
-    { id: "favorites", label: "Избранное", icon: Heart, hint: "Автозагрузка и сохранённое" },
-    { id: "playlists", label: "Плейлисты", icon: ListMusic, hint: "Ваши подборки" },
-  ];
+  const navItems = getSidebarNavItems();
 
   return (
-    <aside className="scrollbar-none sticky top-0 hidden h-screen w-[290px] shrink-0 overflow-y-auto border-r border-white/6 bg-[#0a0d12]/95 px-5 py-6 xl:flex xl:flex-col">
-      <BrandMark />
+    <aside className="scrollbar-none flex h-full w-[190px] shrink-0 flex-col justify-between gap-[12px] overflow-y-auto">
+      <div>
+        <div className="mb-[12px] px-[14px] pb-[6px] pt-[10px]">
+          <div className="mb-[12px] text-[14px] text-[#8f9097]">Inspires Music</div>
+          <BrandMark />
+        </div>
 
-      <div className="mt-10 rounded-[28px] border border-white/8 bg-white/[0.03] p-3">
-        <nav className="flex flex-col gap-1">
+        <nav className="mb-[12px] flex flex-col gap-[8px] rounded-[28px] border border-white/[0.06] bg-[linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01))] p-[14px_12px]">
           {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activePage === item.id;
+            const Icon = iconByKey[item.iconKey];
+            const isActive = item.route ? activePage === item.route : false;
 
             return (
               <button
                 key={item.id}
                 type="button"
-                onClick={() => onNavigate(item.id)}
-                className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-left transition ${
+                disabled={item.disabled}
+                title={item.disabled ? "Будет подключено в следующих этапах" : item.label}
+                onClick={() => {
+                  if (item.route) {
+                    onNavigate(item.route);
+                  }
+                }}
+                className={`inspires-focus-ring flex items-center gap-[12px] rounded-[18px] border border-transparent px-[14px] py-[14px] text-left text-[15px] transition ${
                   isActive
-                    ? "bg-cyan-300/14 text-white shadow-[0_14px_40px_rgba(34,211,238,0.12)]"
-                    : "text-white/60 hover:bg-white/[0.05] hover:text-white"
+                    ? "bg-white/[0.05] text-white"
+                    : item.disabled
+                      ? "cursor-not-allowed text-[#747780] opacity-60"
+                      : "text-[#d7d8dd] hover:bg-white/[0.04]"
                 }`}
               >
-                <span
-                  className={`flex h-11 w-11 items-center justify-center rounded-2xl ${
-                    isActive ? "bg-cyan-300/14 text-cyan-100" : "bg-white/[0.04]"
-                  }`}
-                >
-                  <Icon size={19} />
-                </span>
-                <span className="min-w-0">
-                  <span className="block font-medium">{item.label}</span>
-                  <span className="block truncate text-xs text-white/40">{item.hint}</span>
-                </span>
+                <Icon size={22} className="shrink-0 opacity-95" strokeWidth={1.8} />
+                <span className="min-w-0 truncate">{item.label}</span>
               </button>
             );
           })}
         </nav>
       </div>
 
-      <div className="mt-auto rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
-        <div className="mb-3 text-xs uppercase tracking-[0.22em] text-white/45">Профиль</div>
+      <button
+        type="button"
+        disabled={isAuthLoading}
+        onClick={() => {
+          if (!isAuthenticated) {
+            onNavigate("login");
+          }
+        }}
+        className="inspires-focus-ring rounded-[28px] border border-white/[0.06] bg-[linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01))] p-[12px_14px] text-left transition hover:bg-white/[0.03] disabled:cursor-wait disabled:opacity-70"
+      >
         {!hasRestoredSession ? (
-          <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3 text-sm text-white/45">
-            Восстанавливаем сессию...
-          </div>
+          <div className="text-[13px] text-white/45">Восстанавливаем сессию...</div>
         ) : isAuthenticated && user ? (
-          <>
-            <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3">
-              <div className="text-sm font-medium text-white">{getUserDisplayName(user)}</div>
-              <div className="mt-1 text-xs text-white/50">@{user.login}</div>
+          <div className="flex items-center gap-[12px]">
+            <div className="h-[44px] w-[44px] shrink-0 rounded-full border border-white/[0.08] bg-[radial-gradient(circle_at_35%_30%,#efd5a5,#7f5e43_45%,#30231d_85%)]" />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[15px] font-semibold text-white">
+                {getUserDisplayName(user)}
+              </div>
+              <div className="truncate text-[13px] text-[var(--im-muted)]">Открыть профиль</div>
             </div>
-            <button
-              type="button"
-              onClick={onLogout}
-              disabled={isAuthLoading}
-              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/80 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <LogOut size={15} />
-              Выйти
-            </button>
-          </>
-        ) : (
-          <div className="flex flex-col gap-2">
-            <button
-              type="button"
-              onClick={() => onNavigate("login")}
-              disabled={isAuthLoading}
-              className="flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-300/35 bg-cyan-300/14 px-3 py-2 text-sm text-cyan-100 transition hover:bg-cyan-300/20 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <LogIn size={15} />
-              Вход
-            </button>
-            <button
-              type="button"
-              onClick={() => onNavigate("register")}
-              disabled={isAuthLoading}
-              className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/80 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <UserPlus size={15} />
-              Регистрация
-            </button>
           </div>
+        ) : (
+          <div className="text-center text-[13px] text-white/60">Войти в аккаунт</div>
         )}
-      </div>
+      </button>
     </aside>
   );
 }

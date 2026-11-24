@@ -66,19 +66,11 @@ function toBoundedNumber(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
-function iconButtonClass(enabled?: boolean) {
-  return `rounded-full p-2 transition ${
-    enabled
-      ? "bg-cyan-300/16 text-cyan-100 hover:bg-cyan-300/22"
-      : "text-white/65 hover:bg-white/10 hover:text-white"
-  }`;
-}
-
 function getRangeTrackStyle(percent: number) {
   const safePercent = toBoundedNumber(percent, 0, 100);
 
   return {
-    background: `linear-gradient(90deg, rgba(34, 211, 238, 0.95) 0%, rgba(34, 211, 238, 0.95) ${safePercent}%, rgba(255, 255, 255, 0.24) ${safePercent}%, rgba(255, 255, 255, 0.24) 100%)`,
+    background: `linear-gradient(90deg, var(--im-purple) 0%, #fff ${safePercent}%, rgba(255, 255, 255, 0.18) ${safePercent}%, rgba(255, 255, 255, 0.18) 100%)`,
   };
 }
 
@@ -109,103 +101,111 @@ export function PlayerBar({
   const boundedProgress = toBoundedNumber(progress, 0, safeDuration || 0);
   const progressMax = safeDuration > 0 ? safeDuration : 1;
   const volumeValue = toBoundedNumber(volume, 0, 1);
-  const volumePercent = Math.round((muted ? 0 : volumeValue) * 100);
   const progressPercent = safeDuration > 0 ? (boundedProgress / safeDuration) * 100 : 0;
   const volumeTrackPercent = volumeValue * 100;
-  const favorite = !!currentTrack?.isFavorite;
   const artistNames = currentTrack ? splitTrackArtists(currentTrack.artist) : [];
 
   return (
-    <footer className="border-t border-white/6 px-5 py-3 sm:px-6">
-      <div className="mx-auto w-full max-w-[1500px] rounded-[32px] border border-white/10 bg-[linear-gradient(130deg,rgba(255,255,255,0.035),rgba(255,255,255,0.015))] px-5 py-3 shadow-[0_18px_70px_rgba(0,0,0,0.42)] sm:px-6">
-        {currentTrack ? (
-          <div className="grid items-center gap-4 xl:grid-cols-[minmax(0,320px)_minmax(0,1fr)_220px]">
-            <div className="flex min-w-0 items-center gap-4">
-              <button
-                type="button"
-                onClick={onOpenNowPlaying}
-                title="Открыть полноэкранный плеер"
-                className="shrink-0 rounded-2xl transition hover:opacity-90"
-              >
-                <ImageWithFallback src={currentTrack.coverUrl} alt={currentTrack.title} className="h-16 w-16 rounded-2xl object-cover" />
-              </button>
-              <div className="min-w-0">
-                <div className="truncate text-xl font-semibold text-white">{currentTrack.title}</div>
-                {artistNames.length <= 1 ? (
-                  <button
-                    type="button"
-                    onClick={() => onOpenArtist(artistNames[0])}
-                    className="mt-1 truncate text-left text-sm text-cyan-200/80 transition hover:text-cyan-100"
-                  >
-                    {currentTrack.artist}
-                  </button>
-                ) : (
-                  <div className="mt-1 flex flex-wrap items-center gap-x-1 text-sm text-cyan-200/80">
-                    {artistNames.map((artistName, index) => (
-                      <div key={`${currentTrack.id}:${artistName}`} className="contents">
-                        <button
-                          type="button"
-                          onClick={() => onOpenArtist(artistName)}
-                          className="truncate text-left transition hover:text-cyan-100"
-                        >
-                          {artistName}
-                        </button>
-                        {index < artistNames.length - 1 ? <span className="text-white/35">,</span> : null}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <div className="mt-2 inline-flex rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs uppercase tracking-[0.2em] text-white/55">
-                  {repeatLabelByMode[repeatMode]}
-                </div>
-              </div>
-            </div>
-
+    <footer className="min-h-[82px] rounded-[28px] border border-white/[0.06] bg-[linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01))] p-[14px_18px] shadow-[0_24px_60px_rgba(0,0,0,0.42)]">
+      {currentTrack ? (
+        <div className="grid items-center gap-[16px] xl:grid-cols-[260px_1fr_220px]">
+          <div className="flex min-w-0 items-center gap-[14px]">
+            <button
+              type="button"
+              onClick={onOpenNowPlaying}
+              title="Открыть полноэкранный плеер"
+              className="shrink-0 rounded-[18px] transition hover:opacity-90"
+            >
+              <ImageWithFallback
+                src={currentTrack.coverUrl}
+                alt={currentTrack.title}
+                className="h-[52px] w-[52px] rounded-[18px] border border-white/[0.04] object-cover"
+              />
+            </button>
             <div className="min-w-0">
-              <div className="mb-2 flex items-center justify-center gap-1.5">
+              <div className="truncate text-[15px] font-semibold text-white">{currentTrack.title}</div>
+              {artistNames.length <= 1 ? (
                 <button
                   type="button"
-                  onClick={onToggleFavorite}
-                  title={favorite ? "Удалить из избранного" : "Добавить в избранное"}
-                  className={`group relative rounded-full p-2 transition ${
-                    favorite ? "bg-rose-300/12 hover:bg-rose-300/20" : "text-white/65 hover:bg-white/10 hover:text-white"
-                  }`}
+                  onClick={() => onOpenArtist(artistNames[0])}
+                  className="mt-1 truncate text-left text-[13px] text-white/52 transition hover:text-white"
                 >
-                  {favorite ? (
-                    <>
-                      <img src={favouriteIcon} alt="В избранном" className="h-[18px] w-[18px] transition-opacity duration-150 group-hover:opacity-0" />
-                      <img src={heartbreakIcon} alt="Удалить из избранного" className="absolute left-1/2 top-1/2 h-[18px] w-[18px] -translate-x-1/2 -translate-y-1/2 opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
-                    </>
-                  ) : (
-                    <img src={favouriteIcon} alt="Добавить в избранное" className="h-[18px] w-[18px] opacity-80" />
-                  )}
+                  {currentTrack.artist}
                 </button>
+              ) : (
+                <div className="mt-1 flex flex-wrap items-center gap-x-1 text-[13px] text-white/52">
+                  {artistNames.map((artistName, index) => (
+                    <div key={`${currentTrack.id}:${artistName}`} className="contents">
+                      <button
+                        type="button"
+                        onClick={() => onOpenArtist(artistName)}
+                        className="truncate text-left transition hover:text-white"
+                      >
+                        {artistName}
+                      </button>
+                      {index < artistNames.length - 1 ? <span className="text-white/35">,</span> : null}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
 
-                <button type="button" onClick={onAddToPlaylist} title="Добавить в плейлист" className={iconButtonClass()}>
-                  <ListPlus size={18} />
-                </button>
-                <button type="button" onClick={onToggleShuffle} title="Перемешать" className={iconButtonClass(shuffleEnabled)}>
-                  <img src={shuffleIcon} alt="Перемешать" className="h-[18px] w-[18px]" />
-                </button>
-                <button type="button" onClick={onPrevious} title="Предыдущий трек" className={iconButtonClass()}>
-                  <SkipBack size={20} />
-                </button>
-                <button type="button" onClick={onPlayPause} title={isPlaying ? "Пауза" : "Воспроизвести"} className="rounded-full bg-white p-3 text-black transition hover:bg-white/90">
-                  {isPlaying ? <Pause size={22} className="fill-black" /> : <Play size={22} className="fill-black" />}
-                </button>
-                <button type="button" onClick={onNext} title="Следующий трек" className={iconButtonClass()}>
-                  <SkipForward size={20} />
-                </button>
-                <button type="button" onClick={onCycleRepeatMode} title={repeatLabelByMode[repeatMode]} className={iconButtonClass(repeatMode !== "off")}>
-                  <img src={repeatIconByMode[repeatMode]} alt={repeatLabelByMode[repeatMode]} className="h-[18px] w-[18px]" />
-                </button>
-                <button type="button" onClick={onShowLyrics} title="Детали трека" className={iconButtonClass()}>
-                  <img src={subtitleIcon} alt="Детали трека" className="h-[18px] w-[18px]" />
-                </button>
-              </div>
+          <div className="flex min-w-0 flex-col items-center justify-center gap-[10px]">
+            <div className="flex items-center gap-[14px] text-[#ddd]">
+              <button
+                type="button"
+                onClick={onCycleRepeatMode}
+                title={repeatLabelByMode[repeatMode]}
+                className="flex h-[28px] w-[28px] items-center justify-center rounded-full border border-white/[0.05] bg-white/[0.04] text-white transition hover:translate-y-[-1px]"
+              >
+                <img
+                  src={repeatIconByMode[repeatMode]}
+                  alt={repeatLabelByMode[repeatMode]}
+                  className="h-[12px] w-[12px]"
+                />
+              </button>
+              <button
+                type="button"
+                onClick={onPrevious}
+                title="Предыдущий трек"
+                className="flex h-[28px] w-[28px] items-center justify-center rounded-full border border-white/[0.05] bg-white/[0.04] text-white transition hover:translate-y-[-1px]"
+              >
+                <SkipBack size={12} />
+              </button>
+              <button
+                type="button"
+                onClick={onPlayPause}
+                title={isPlaying ? "Пауза" : "Воспроизвести"}
+                className="flex h-[34px] w-[34px] items-center justify-center rounded-full bg-white text-black shadow-[0_6px_16px_rgba(255,255,255,0.12)] transition hover:bg-white/90"
+              >
+                {isPlaying ? (
+                  <Pause size={14} className="fill-black" />
+                ) : (
+                  <Play size={14} className="ml-[2px] fill-black" />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={onNext}
+                title="Следующий трек"
+                className="flex h-[28px] w-[28px] items-center justify-center rounded-full border border-white/[0.05] bg-white/[0.04] text-white transition hover:translate-y-[-1px]"
+              >
+                <SkipForward size={12} />
+              </button>
+              <button
+                type="button"
+                onClick={onToggleShuffle}
+                title="Перемешать"
+                className="flex h-[28px] w-[28px] items-center justify-center rounded-full border border-white/[0.05] bg-white/[0.04] text-white transition hover:translate-y-[-1px]"
+              >
+                <img src={shuffleIcon} alt="Перемешать" className="h-[12px] w-[12px]" />
+              </button>
+            </div>
 
-              <div className="flex items-center gap-3">
-                <span className="w-9 text-right text-sm text-white/45">{formatDuration(boundedProgress)}</span>
+            <div className="flex w-full min-w-0 max-w-[520px] items-center gap-[12px] text-[12px] text-[var(--im-muted)]">
+              <span>{formatDuration(boundedProgress)}</span>
+              <div className="relative h-[6px] flex-1 cursor-pointer rounded-full bg-white/[0.18]">
                 <input
                   type="range"
                   min={0}
@@ -213,17 +213,27 @@ export function PlayerBar({
                   step={0.1}
                   value={boundedProgress}
                   onChange={(event) => onSeek(Number(event.target.value))}
-                  style={getRangeTrackStyle(progressPercent)}
-                  className="h-1.5 w-full cursor-pointer appearance-none rounded-full accent-cyan-300"
+                  className="absolute inset-0 h-full w-full cursor-pointer appearance-none bg-transparent"
                 />
-                <span className="w-9 text-sm text-white/45">{formatDuration(safeDuration)}</span>
+                <div
+                  className="pointer-events-none absolute left-0 top-0 h-full rounded-full bg-[linear-gradient(90deg,var(--im-purple),#fff)]"
+                  style={{ width: `${progressPercent}%` }}
+                />
+                <div
+                  className="pointer-events-none absolute top-1/2 h-[10px] w-[10px] -translate-y-1/2 rounded-full bg-white shadow-[0_0_0_3px_rgba(255,255,255,0.08)]"
+                  style={{ left: `${progressPercent}%`, transform: `translate(-50%, -50%)` }}
+                />
               </div>
+              <span>{formatDuration(safeDuration)}</span>
             </div>
+          </div>
 
-            <div className="flex items-center justify-end gap-4">
-              <button type="button" onClick={onToggleMute} title={muted ? "Включить звук" : "Выключить звук"} className={iconButtonClass()}>
-                <img src={getVolumeIcon(volumeValue, muted)} alt="Громкость" className="h-5 w-5" />
-              </button>
+          <div className="flex items-center justify-end gap-[10px] text-[13px] text-[var(--im-muted)]">
+            <span>Очередь</span>
+            <button type="button" onClick={onToggleMute} title={muted ? "Включить звук" : "Выключить звук"}>
+              <img src={getVolumeIcon(volumeValue, muted)} alt="Громкость" className="h-[18px] w-[18px]" />
+            </button>
+            <div className="relative h-[4px] w-[86px] cursor-pointer rounded-full bg-white/[0.15]">
               <input
                 type="range"
                 min={0}
@@ -231,18 +241,20 @@ export function PlayerBar({
                 step={0.01}
                 value={volumeValue}
                 onChange={(event) => onVolumeChange(Number(event.target.value))}
-                style={getRangeTrackStyle(volumeTrackPercent)}
-                className="h-1.5 w-[170px] cursor-pointer appearance-none rounded-full accent-cyan-300"
+                className="absolute inset-0 h-full w-full cursor-pointer appearance-none bg-transparent"
               />
-              <span className="w-10 text-right text-sm text-white/55">{volumePercent}%</span>
+              <div
+                className="pointer-events-none absolute left-0 top-0 h-full rounded-full bg-white/[0.8]"
+                style={{ width: `${volumeTrackPercent}%` }}
+              />
             </div>
           </div>
-        ) : (
-          <div className="flex items-center justify-center rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-6 py-5 text-sm text-white/45">
-            Выберите трек, чтобы начать воспроизведение.
-          </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-center rounded-[18px] border border-dashed border-white/10 bg-white/[0.02] px-6 py-5 text-[14px] text-white/45">
+          Выберите трек, чтобы начать воспроизведение.
+        </div>
+      )}
     </footer>
   );
 }

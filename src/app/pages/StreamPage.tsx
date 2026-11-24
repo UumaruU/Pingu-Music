@@ -42,7 +42,9 @@ export function StreamPage(trackListProps: StreamPageProps) {
   const [error, setError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [wavePlaybackStarted, setWavePlaybackStarted] = useState(false);
+  const [recommendationRequestId, setRecommendationRequestId] = useState<string | null>(null);
   const requestIdRef = useRef(0);
+  const impressionKeysRef = useRef(new Set<string>());
   const currentQueue = useAppStore((state) => state.currentQueue);
   const queueCurrentTrackId = useAppStore((state) => state.currentTrackId);
   const syncQueue = useAppStore((state) => state.syncQueue);
@@ -60,6 +62,7 @@ export function StreamPage(trackListProps: StreamPageProps) {
       setSeedLabel("Требуется вход");
       setContextSummary("Войдите, чтобы сервер подбирал персональную волну.");
       setStrategy("user-feed");
+      setRecommendationRequestId(null);
       setStatus("idle");
       setError(null);
       return;
@@ -70,6 +73,7 @@ export function StreamPage(trackListProps: StreamPageProps) {
     setStatus("loading");
     setError(null);
     setNextItem(null);
+    setRecommendationRequestId(null);
 
     try {
       const batch = await recommendationFacade.getRecommendationStreamBatch({
@@ -83,6 +87,7 @@ export function StreamPage(trackListProps: StreamPageProps) {
       }
 
       setNextItem(batch.items[0] ?? null);
+      setRecommendationRequestId(batch.requestId ?? null);
       setSeedLabel(batch.seedLabel);
       setContextSummary(
         batch.contextSummary ??
@@ -105,6 +110,27 @@ export function StreamPage(trackListProps: StreamPageProps) {
   useEffect(() => {
     void loadWavePreview();
   }, [currentBasisTrackId, isAuthenticated, reloadToken]);
+
+  useEffect(() => {
+    if (status !== "ready" || !recommendationRequestId || !nextItem) {
+      return;
+    }
+
+    const key = `${recommendationRequestId}:stream:${nextItem.track.id}:0`;
+    if (impressionKeysRef.current.has(key)) {
+      return;
+    }
+
+    impressionKeysRef.current.add(key);
+    void recommendationFacade.recordRecommendationImpressions([
+      {
+        requestId: recommendationRequestId,
+        surface: "stream",
+        position: 0,
+        trackId: nextItem.track.id,
+      },
+    ]);
+  }, [nextItem, recommendationRequestId, status]);
 
   useEffect(() => {
     if (!wavePlaybackStarted || !currentBasisTrackId || !desiredWaveQueueIds.length) {
@@ -130,6 +156,16 @@ export function StreamPage(trackListProps: StreamPageProps) {
     }
 
     setWavePlaybackStarted(true);
+    if (recommendationRequestId && nextItem) {
+      void recommendationFacade.recordRecommendationInteraction({
+        requestId: recommendationRequestId,
+        surface: "stream",
+        position: 0,
+        trackId: nextItem.track.id,
+        action: "play",
+        metadata: { trigger: "wave_button" },
+      });
+    }
 
     if (action.type === "sync-queue") {
       syncQueue(action.queueIds, action.queueIds);
@@ -146,7 +182,59 @@ export function StreamPage(trackListProps: StreamPageProps) {
 
   const handlePlayNextTrack = (trackId: string, queueIds: string[]) => {
     setWavePlaybackStarted(true);
+    if (recommendationRequestId && nextItem?.track.id === trackId) {
+      void recommendationFacade.recordRecommendationInteraction({
+        requestId: recommendationRequestId,
+        surface: "stream",
+        position: 0,
+        trackId,
+        action: "play",
+      });
+    }
     trackListProps.onPlay(trackId, queueIds.length ? queueIds : [trackId]);
+  };
+
+  const handleToggleFavorite = (trackId: string) => {
+    if (recommendationRequestId && nextItem?.track.id === trackId) {
+      void recommendationFacade.recordRecommendationInteraction({
+        requestId: recommendationRequestId,
+        surface: "stream",
+        position: 0,
+        trackId,
+        action: "favorite",
+      });
+    }
+
+    trackListProps.onToggleFavorite(trackId);
+  };
+
+  const handleAddToPlaylist = (trackId: string) => {
+    if (recommendationRequestId && nextItem?.track.id === trackId) {
+      void recommendationFacade.recordRecommendationInteraction({
+        requestId: recommendationRequestId,
+        surface: "stream",
+        position: 0,
+        trackId,
+        action: "playlist_add",
+      });
+    }
+
+    trackListProps.onAddToPlaylist(trackId);
+  };
+
+  const handleOpenArtist = (trackId: string, artistName?: string) => {
+    if (recommendationRequestId && nextItem?.track.id === trackId) {
+      void recommendationFacade.recordRecommendationInteraction({
+        requestId: recommendationRequestId,
+        surface: "stream",
+        position: 0,
+        trackId,
+        action: "open",
+        metadata: artistName ? { target: "artist", artistName } : { target: "artist" },
+      });
+    }
+
+    trackListProps.onOpenArtist(trackId, artistName);
   };
 
   if (!isAuthenticated) {
@@ -306,10 +394,10 @@ export function StreamPage(trackListProps: StreamPageProps) {
             currentTrackId={trackListProps.currentTrackId}
             isPlaying={trackListProps.isPlaying}
             onPlay={handlePlayNextTrack}
-            onToggleFavorite={trackListProps.onToggleFavorite}
-            onAddToPlaylist={trackListProps.onAddToPlaylist}
+            onToggleFavorite={handleToggleFavorite}
+            onAddToPlaylist={handleAddToPlaylist}
             onShowLyrics={trackListProps.onShowLyrics}
-            onOpenArtist={trackListProps.onOpenArtist}
+            onOpenArtist={handleOpenArtist}
           />
         ) : null}
 
